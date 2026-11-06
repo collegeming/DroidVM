@@ -11,7 +11,8 @@ import java.util.concurrent.*;
 final class PhysicalGrab {
     interface Sink {void records(long generation,byte[] bytes);void released(long generation,String reason);}
     private final Sink sink;
-    private final Object lock=new Object();
+    private final GrabLease lease=new GrabLease();
+    private final Object lock=lease;
     private final Map<String,Grab> grabs=new LinkedHashMap<>();
     private long generation;
     private String reason="not requested";
@@ -44,13 +45,15 @@ final class PhysicalGrab {
             }
         }
     }
+    void publish(long session){lease.publish(session,()->{stopLocked();generation=0;reason="not requested";});}
     String arm(long session){
         try{
             UnixHelper.load();loaded=UnixHelper.isLoaded();
-            if(!loaded){reason="NATIVE_HELPER_UNAVAILABLE";return status();}
-            synchronized(lock){if(generation!=session){stopLocked();generation=session;}reason="armed";}
+            if(!loaded){synchronized(lock){if(lease.current(session))reason="NATIVE_HELPER_UNAVAILABLE";}return status();}
+            // Publication, authorization and mutation share the very same monitor. Stale arm never stops a newer grab.
+            if(!lease.arm(session,()->{generation=session;reason="armed";}))return status();
             rescan();return status();
-        }catch(Throwable ignored){reason="GRAB_UNAVAILABLE";return status();}
+        }catch(Throwable ignored){synchronized(lock){if(lease.current(session))reason="GRAB_UNAVAILABLE";}return status();}
     }
     private void rescan(){
         long session;synchronized(lock){session=generation;}if(session<=0||!loaded)return;
@@ -70,7 +73,7 @@ final class PhysicalGrab {
             }
         }catch(Throwable ignored){reason="GRAB_SCAN_FAILED";}
     }
-    void release(long session,String why){synchronized(lock){if(generation!=session)return;stopLocked();generation=0;reason=why;}}
+    void release(long session,String why){lease.revoke(session,()->{stopLocked();generation=0;reason=why;});}
     private void stopLocked(){for(Grab grab:grabs.values())grab.stop();grabs.clear();}
     boolean held(String name,int vendor,int product){synchronized(lock){for(Grab grab:grabs.values())if(!grab.stopping&&grab.device.name.equals(name)&&grab.device.vendor==vendor&&grab.device.product==product)return true;return false;}}
     String status(){

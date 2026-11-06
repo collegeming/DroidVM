@@ -14,7 +14,7 @@ public final class InputBroker {
     static final String PACKAGE="io.github.collegeming.archlauncher", ACTION=PACKAGE+".BROKER";
     private static final int RELEASE_MS=1500;
     private final DaemonClient daemon=new DaemonClient();
-    private final ExecutorService io=new ThreadPoolExecutor(1,1,0,TimeUnit.MILLISECONDS,new ArrayBlockingQueue<>(64));
+    private final BrokerIo io=new BrokerIo(this::cleanNow);
     // Immediate revocation is independent of IO progress; no network call holds a state monitor.
     private final Set<Long> revoked=ConcurrentHashMap.newKeySet();
     private volatile long publishedGeneration;
@@ -39,12 +39,11 @@ public final class InputBroker {
             public void records(long session,byte[] bytes){
                 if(revoked.contains(session))return;
                 MonotonicDeadline budget=new MonotonicDeadline(1500);
-                try{io.execute(()->{int result=writeNow(session,1,bytes,budget);if(result!=BrokerGate.DELIVERED){physical.release(session,"RAW_DELIVERY_FAILED");revoked.add(session);MonotonicDeadline cleanup=new MonotonicDeadline(RELEASE_MS);queue(()->{if(gate.current(session))release(cleanup);});}});}
-                catch(RejectedExecutionException ignored){physical.release(session,"RAW_QUEUE_FULL");revoked.add(session);MonotonicDeadline cleanup=new MonotonicDeadline(RELEASE_MS);queue(()->{if(gate.current(session))release(cleanup);});}
+                try{io.execute(()->{int result=writeNow(session,1,bytes,budget);if(result!=BrokerGate.DELIVERED){physical.release(session,"RAW_DELIVERY_FAILED");requestCleanup(session,result,false);}});}
+                catch(RejectedExecutionException ignored){physical.release(session,"RAW_QUEUE_FULL");requestCleanup(session,BrokerGate.PAUSED,false);}
             }
             public void released(long session,String reason){
-                revoked.add(session);MonotonicDeadline cleanup=new MonotonicDeadline(RELEASE_MS);
-                queue(()->{if(gate.pause(session,"ESCAPE_RELEASED".equals(reason)?BrokerGate.ESCAPE:BrokerGate.PAUSED))release(cleanup);});
+                requestCleanup(session,"ESCAPE_RELEASED".equals(reason)?BrokerGate.ESCAPE:BrokerGate.PAUSED,false);
             }
         });
     }
@@ -59,7 +58,14 @@ public final class InputBroker {
             return future.get(Math.max(1,budget.nanos()),TimeUnit.NANOSECONDS);
         }catch(Exception ignored){return failure;}
     }
-    private void queue(Runnable work){try{io.execute(work);}catch(RejectedExecutionException ignored){}}
+    private void requestCleanup(long session,int reason,boolean retire){
+        revoked.add(session);io.cleanup(session,reason,retire,new MonotonicDeadline(RELEASE_MS));
+    }
+    private void cleanNow(BrokerIo.Cleanup cleanup){
+        if(!gate.current(cleanup.generation))return;
+        if(cleanup.retire)retire(cleanup.generation,cleanup.budget);
+        else if(gate.pause(cleanup.generation,cleanup.reason))release(cleanup.budget);
+    }
     private boolean send(int channel,byte[] bytes,MonotonicDeadline budget){
         sendResult=BrokerGate.IPC_ERROR;
         if(budget.millis()==0)return false;
@@ -119,7 +125,7 @@ public final class InputBroker {
         if(!send(channel,bytes,budget)){
             int failure=sendResult;physical.release(session,"INPUT_DELIVERY_FAILED");gate.pause(session,failure);revoked.add(session);
             // Preserve the original ACK/transport cause before cleanup attempts another send.
-            MonotonicDeadline cleanup=new MonotonicDeadline(RELEASE_MS);queue(()->{if(gate.current(session))release(cleanup);});return failure;
+            requestCleanup(session,failure,false);return failure;
         }
         data.rewind();while(data.remaining()>=8){
             int type=data.getShort()&65535,code=data.getShort()&65535,value=data.getInt();
@@ -164,8 +170,8 @@ public final class InputBroker {
                 },allowStart,budget);
                 if(ready<0)return ready;
                 if(budget.millis()==0)return ManagedStart.START_TIMEOUT;
-                vm=target;long captured=gate.attach();publishedGeneration=captured;client=lifetime;
-                death=()->{physical.release(captured,"CLIENT_DIED");revoked.add(captured);MonotonicDeadline deathBudget=new MonotonicDeadline(RELEASE_MS);queue(()->retire(captured,deathBudget));};
+                vm=target;long captured=gate.attach();physical.publish(captured);publishedGeneration=captured;client=lifetime;
+                death=()->{physical.release(captured,"CLIENT_DIED");requestCleanup(captured,BrokerGate.PAUSED,true);};
                 try{client.linkToDeath(death,0);}catch(RemoteException ignored){retire(captured,new MonotonicDeadline(RELEASE_MS));return ManagedStart.NOT_READY;}
                 return captured;
             },ManagedStart.START_TIMEOUT);
@@ -184,10 +190,8 @@ public final class InputBroker {
         public String keyboardGrab(String supplied,long session,boolean enabled){
             check(supplied);
             if(!enabled){physical.release(session,"DISABLED");return physical.status();}
-            if(session!=publishedGeneration||revoked.contains(session))return "{\"held\":[],\"reason\":\"SESSION_PAUSED\"}";
-            physical.arm(session);
-            if(session!=publishedGeneration||revoked.contains(session))physical.release(session,"SESSION_PAUSED");
-            return physical.status();
+            // PhysicalGrab.arm authorizes and mutates atomically under the publication/revocation lease.
+            return physical.arm(session);
         }
         public String grabStatus(String supplied,long session){
             check(supplied);return physical.status();
@@ -202,12 +206,10 @@ public final class InputBroker {
             },BrokerGate.IPC_ERROR);
         }
         public void releaseAll(String supplied,long session){
-            check(supplied);physical.release(session,"CLIENT_RELEASED");revoked.add(session);MonotonicDeadline budget=new MonotonicDeadline(RELEASE_MS);
-            call(budget,()->{if(gate.pause(session,BrokerGate.PAUSED))release(budget);return true;},false);
+            check(supplied);physical.release(session,"CLIENT_RELEASED");requestCleanup(session,BrokerGate.PAUSED,false);
         }
         public void detach(String supplied,long session){
-            check(supplied);physical.release(session,"CLIENT_RELEASED");revoked.add(session);MonotonicDeadline budget=new MonotonicDeadline(RELEASE_MS);
-            call(budget,()->{retire(session,budget);return true;},false);
+            check(supplied);physical.release(session,"CLIENT_RELEASED");requestCleanup(session,BrokerGate.PAUSED,true);
         }
     };}
     public static void main(String[] args)throws Exception{
@@ -220,8 +222,8 @@ public final class InputBroker {
         Handler handler=new Handler(Looper.getMainLooper());
         handler.postDelayed(new Runnable(){public void run(){if(owner.publishedGeneration!=0)return;context.sendBroadcast(new Intent(ACTION).setPackage(PACKAGE).putExtra("session",session));handler.postDelayed(this,500);}},250);
         new Thread(()->{try{while(control.readLine()!=null){}}catch(Exception ignored){}finally{
-            owner.closing=true;long g=owner.publishedGeneration;owner.physical.release(g,"OWNER_PIPE_CLOSED");owner.revoked.add(g);MonotonicDeadline budget=new MonotonicDeadline(RELEASE_MS);
-            owner.call(budget,()->{owner.retire(g,budget);return true;},false);System.exit(0);
+            owner.closing=true;long g=owner.publishedGeneration;owner.physical.release(g,"OWNER_PIPE_CLOSED");owner.requestCleanup(g,BrokerGate.PAUSED,true);
+            try{Thread.sleep(RELEASE_MS);}catch(InterruptedException ignored){}System.exit(0);
         }},"broker-owner").start();
         handler.postDelayed(()->{if(!owner.attachedOnce)System.exit(0);},15000);Looper.loop();
     }

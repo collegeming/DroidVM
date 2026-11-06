@@ -15,7 +15,11 @@ assert 'post(' not in fullscreen and 'postDelayed' not in fullscreen
 broker = (source/'InputBroker.java').read_text(encoding='utf-8')
 assert 'if(!gate.current(expected))return;' in broker
 assert 'synchronized' not in broker
-assert 'MonotonicDeadline budget=new MonotonicDeadline(RELEASE_MS)' in broker
+assert 'io.cleanup(session,reason,retire,new MonotonicDeadline(RELEASE_MS))' in broker
+physical = (source/'PhysicalGrab.java').read_text(encoding='utf-8')
+assert 'lease.arm(session,' in physical and 'lease.revoke(session,' in physical
+assert 'physical.publish(captured)' in broker
+assert 'private void queue(' not in broker
 assert 'if(!sourceLifetime.current(sourceId)||service!=captured)return;' in activity
 assert 'int state=gate.status(session);if(state!=0)return state;' in broker
 assert 'for(int slot:touchSlots)' in broker
