@@ -33,6 +33,17 @@ class Preflight(unittest.TestCase):
         self.assertFalse(self.m['profiles'][0]['enabled'])
         self.assertEqual(preflight.evaluate(candidate, self.inv)['action'], 'explicit-known-version-replay-required')
 
+    def test_probe_breaks_only_lock_observation_cycle(self):
+        self.inv['private_lock_lifetime_verified'] = False
+        with self.assertRaisesRegex(ValueError, 'lock FDs'):
+            enroller.enroll(self.m, self.inv)
+        candidate = enroller.enroll(self.m, self.inv, 'a' * 32)
+        self.assertEqual(candidate['test_only_probe_nonce'], 'a' * 32)
+        self.assertFalse(self.inv['private_lock_lifetime_verified'])
+        self.inv['proc_fd_scan_verified'] = False
+        with self.assertRaisesRegex(ValueError, 'proc'):
+            enroller.enroll(self.m, self.inv, 'a' * 32)
+
     def test_unknown_launcher_never_overwritten(self):
         self.inv['launcher_sha256'] = '2' * 64
         with self.assertRaisesRegex(ValueError, 'unknown launcher'):

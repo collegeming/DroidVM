@@ -37,7 +37,8 @@ def compile_manifest(data):
             + 'static const struct Env envs[] = {' + ',\n'.join(envs) + '};\n'
             + '#define GUARD ' + q(data['guard']) + '\n'
             + '#define STOCK ' + q(data['stock']['path']) + '\n'
-            + '#define STOCK_HASH ' + q(data['stock']['sha256']) + '\n')
+            + '#define STOCK_HASH ' + q(data['stock']['sha256']) + '\n'
+            + '#define PROBE_NONCE ' + q(data.get('test_only_probe_nonce', '')) + '\n')
 
 if __name__ == '__main__':
     import argparse

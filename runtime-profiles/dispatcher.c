@@ -74,6 +74,15 @@ static int take_lock(const char *name) {
 #ifndef PROC_ROOT
 #define PROC_ROOT "/proc"
 #endif
+static void consume_probe_gate(void) {
+ if(!*PROBE_NONCE) return;
+ if(geteuid()!=0) fail("TEST_ONLY probe requires root");
+ const char *path=LOCK_ROOT "/profile-probe-gate";
+ int fd=open(path,O_RDONLY|O_NOFOLLOW|O_CLOEXEC); struct stat s; char nonce[34]={0};
+ if(fd<0||fstat(fd,&s)||!S_ISREG(s.st_mode)||s.st_uid!=0||(s.st_mode&0077)||flock(fd,LOCK_EX|LOCK_NB)||read(fd,nonce,sizeof(nonce)-1)!=(ssize_t)strlen(PROBE_NONCE)||!same(nonce,PROBE_NONCE)) fail("TEST_ONLY one-shot root gate missing/invalid");
+ if(unlink(path)) fail("TEST_ONLY gate consume failed");
+ close(fd);
+}
 static void refuse_external_open(const struct stat *disk) {
  DIR *proc=opendir(PROC_ROOT); if(!proc) fail("cannot inspect proc");
  struct dirent *entry; char path[512];
@@ -206,9 +215,15 @@ int main(int argc,char **argv) {
   for(int j=before;j<=i;j++) out[n++]=argv[j];
  }
  if(guards!=1||gpu!=1||blocks!=1||initrds!=1||sockets!=1||services!=1||inputs<1||kernels!=1) fail("required identity/guard missing");
+ consume_probe_gate();
  (void)take_lock("unified-gpu-profile");
  (void)take_lock(p->uuid);
- struct stat initial=disk_identity(p); refuse_external_open(&initial); verify_files(p);
+ struct stat initial=disk_identity(p); refuse_external_open(&initial);
+ for(size_t j=0;j<sizeof(profiles)/sizeof(*profiles);j++) if(&profiles[j]!=p) {
+  struct stat other; if(stat(profiles[j].disk,&other)) fail("cannot inspect other managed GPU disk");
+  refuse_external_open(&other);
+ }
+ verify_files(p);
  // FUSE has no flock; private GPU + UUID locks provide managed lifetime exclusion.
  int diskfd=open(p->disk,O_RDONLY|O_NOFOLLOW|O_CLOEXEC); if(diskfd<0) fail("managed disk unavailable");
  struct stat ds,now; if(fstat(diskfd,&ds)||lstat(p->disk,&now)||ds.st_dev!=initial.st_dev||ds.st_ino!=initial.st_ino||ds.st_dev!=now.st_dev||ds.st_ino!=now.st_ino) fail("disk changed during validation");
@@ -224,6 +239,8 @@ int main(int argc,char **argv) {
  // Never carry the other renderer's ambient tuning into this profile.
  const char *clear[]={"CROSVM_DISPLAY_VULKAN_LIBRARY","CROSVM_ENABLE_VULKANO_GRALLOC","GFXSTREAM_DEVICE_LOCAL_MEMORY_TYPE",NULL};
  for(int k=0;clear[k];k++) unsetenv(clear[k]);
+ // Clear every reviewed renderer key first, then set only this profile's values.
+ for(size_t k=0;k<sizeof(envs)/sizeof(*envs);k++) unsetenv(envs[k].key);
  for(int k=p->env_start;k<p->env_start+p->env_count;k++) if(setenv(envs[k].key,envs[k].value,1)) fail("environment");
  // execv preserves inherited serial fds, all unchanged argv and extended exit statuses.
  // /proc/self/exe is now the selected real crosvm, including AAudio `device snd` re-exec.
