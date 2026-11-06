@@ -253,7 +253,8 @@ public final class KeyboardGrabManager {
             // The same console asking again is the grab it already has; a different VM or screen
             // takes it over, because only one console can be the one in front.
             if (current != null
-                && (!current.vmId.equals(vmId) || !current.screenId.equals(screenId)))
+                && (!current.vmId.equals(vmId) || !current.screenId.equals(screenId)
+                    || !java.util.Objects.equals(current.token, token)))
                 releaseLocked("taken over by another console");
             if (target == null) {
                 var t = new Target(vmId, screenId, token);
@@ -277,6 +278,14 @@ public final class KeyboardGrabManager {
      * Android starts the incoming Activity before it stops the outgoing one -- so an unconditional
      * release here would take the keyboard away from whoever is now in front.
      */
+    public boolean releaseFor(@NonNull String vmId, @NonNull String screenId,
+                              @Nullable IBinder token) {
+        synchronized (lock) {
+            if (target == null || !java.util.Objects.equals(target.token, token)) return false;
+            return releaseFor(vmId, screenId);
+        }
+    }
+
     public boolean releaseFor(@NonNull String vmId, @NonNull String screenId) {
         synchronized (lock) {
             var current = target;
@@ -672,7 +681,11 @@ public final class KeyboardGrabManager {
     /** False when the token is already dead, which is a console not worth arming for. */
     private boolean linkToken(@NonNull Target t) {
         if (t.token == null) return true;
-        t.death = () -> release("console gone");
+        t.death = () -> {
+            synchronized (lock) {
+                if (target == t) releaseLocked("console gone");
+            }
+        };
         try {
             t.token.linkToDeath(t.death, 0);
             return true;

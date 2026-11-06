@@ -1,6 +1,9 @@
 name: Native input validation
 on:
   workflow_dispatch:
+  push:
+    branches: [native-input-3348830]
+    paths: ['app/**', '.github/workflows/native-input-validation.yml']
 permissions:
   contents: read
 jobs:

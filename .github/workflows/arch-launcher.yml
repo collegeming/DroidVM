@@ -1,6 +1,9 @@
 name: Arch launcher
 on:
   workflow_dispatch:
+  push:
+    branches: [native-input-3348830]
+    paths: ['companion/**', '.github/workflows/arch-launcher.yml']
 permissions:
   contents: read
 jobs:

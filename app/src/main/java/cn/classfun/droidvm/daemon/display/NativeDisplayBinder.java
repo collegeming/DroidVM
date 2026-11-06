@@ -78,7 +78,7 @@ public final class NativeDisplayBinder {
                 var keyboard = ctx.getKeyboard();
                 var screen = screenId == null ? "" : screenId;
                 if (!grab || vmId == null || vmId.isEmpty()) {
-                    if (vmId != null && !vmId.isEmpty()) keyboard.releaseFor(vmId, screen);
+                    if (vmId != null && !vmId.isEmpty()) keyboard.releaseFor(vmId, screen, token);
                     else keyboard.release("console released it");
                     return 0;
                 }
