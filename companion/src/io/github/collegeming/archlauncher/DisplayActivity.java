@@ -14,15 +14,16 @@ public final class DisplayActivity extends Activity {
     private TextView status;
     private boolean statusExpanded;
     private NativeSurfaceSource source;
+    private final SourceLifetime sourceLifetime=new SourceLifetime();
     private InputForwarder input;
     private boolean resumed,displayReady,ime,manualGate;
     private int width=2272,height=1514,buttons;
-    private boolean mouseKnown;
+    private boolean mouseKnown, touchActive;
     private float mouseX,mouseY;
     private SessionService service;
     private final Runnable findSession=new Runnable(){public void run(){
         if(!resumed)return;
-        if(SessionService.active!=null && service!=SessionService.active){service=SessionService.active;service.attachDisplay(DisplayActivity.this);}
+        if(SessionService.active!=null && service!=SessionService.active){if(service!=null)service.removeDisplay(DisplayActivity.this);disconnected();service=SessionService.active;service.attachDisplay(DisplayActivity.this);}
         updateStatus();main.postDelayed(this,500);
     }};
     public void onCreate(Bundle state){super.onCreate(state);
@@ -45,11 +46,13 @@ public final class DisplayActivity extends Activity {
             if(e.getActionMasked()==MotionEvent.ACTION_CANCEL){suspend();refreshGate();return true;}
             if(input==null||service==null||!service.canInput())return false;
             if(e.isFromSource(InputDevice.SOURCE_MOUSE))return mouse(e);
+            if(e.getActionMasked()==MotionEvent.ACTION_DOWN)touchActive=true;
+            else if(!touchActive)return true; // a new lease cannot adopt a finger already down
             MotionEvent.PointerProperties[] props=new MotionEvent.PointerProperties[e.getPointerCount()];
             MotionEvent.PointerCoords[] coords=new MotionEvent.PointerCoords[e.getPointerCount()];
             for(int i=0;i<props.length;i++){props[i]=new MotionEvent.PointerProperties();coords[i]=new MotionEvent.PointerCoords();e.getPointerProperties(i,props[i]);e.getPointerCoords(i,coords[i]);coords[i].x=Math.max(0,Math.min(surface.getWidth()-1,coords[i].x));coords[i].y=Math.max(0,Math.min(surface.getHeight()-1,coords[i].y));}
             MotionEvent copy=MotionEvent.obtain(e.getDownTime(),e.getEventTime(),e.getAction(),props.length,props,coords,e.getMetaState(),e.getButtonState(),e.getXPrecision(),e.getYPrecision(),e.getDeviceId(),e.getEdgeFlags(),e.getSource(),e.getFlags());
-            input.sendTouchEvent(copy,EvdevEncoder.NORMALIZED_ABS_MAX/(float)Math.max(1,surface.getWidth()-1),EvdevEncoder.NORMALIZED_ABS_MAX/(float)Math.max(1,surface.getHeight()-1));copy.recycle();return true;
+            input.sendTouchEvent(copy,EvdevEncoder.NORMALIZED_ABS_MAX/(float)Math.max(1,surface.getWidth()-1),EvdevEncoder.NORMALIZED_ABS_MAX/(float)Math.max(1,surface.getHeight()-1));copy.recycle();if(e.getActionMasked()==MotionEvent.ACTION_UP)touchActive=false;return true;
         });
         surface.setOnGenericMotionListener((v,e)->mouse(e));
         setContentView(area);surface.requestFocus();
@@ -58,11 +61,12 @@ public final class DisplayActivity extends Activity {
     void sessionReady(){
         if(source==null&&service!=null){
             final SessionService captured=service;
+            final long sourceId=sourceLifetime.begin();
             source=new NativeSurfaceSource(surface,width,height,captured::displayBinder,main,new DisplaySource.Callbacks(){
-                public void onContentSize(int w,int h){width=w;height=h;fit();}
-                public void onStateChanged(DisplaySource.State state){displayReady=state==DisplaySource.State.CONNECTED;refreshGate();updateStatus();}
+                public void onContentSize(int w,int h){if(!sourceLifetime.current(sourceId)||service!=captured)return;width=w;height=h;fit();}
+                public void onStateChanged(DisplaySource.State state){if(!sourceLifetime.current(sourceId)||service!=captured)return;displayReady=state==DisplaySource.State.CONNECTED;refreshGate();updateStatus();}
             });
-            source.setCursorView(cursor);source.setCursorListener((x,y)->{cursor.setX(surface.getX()+x*surface.getWidth()/(float)width);cursor.setY(surface.getY()+y*surface.getHeight()/(float)height);});
+            source.setCursorView(cursor);source.setCursorListener((x,y)->{if(!sourceLifetime.current(sourceId)||service!=captured)return;cursor.setX(surface.getX()+x*surface.getWidth()/(float)width);cursor.setY(surface.getY()+y*surface.getHeight()/(float)height);});
         }
         if(service!=null&&service.canInput()&&input==null)input=service.newForwarder();
         refreshGate();
@@ -73,9 +77,9 @@ public final class DisplayActivity extends Activity {
         if(!allowed){if(input!=null)clearInput();if(!manualGate){manualGate=true;service.gate(false);}}
         else{manualGate=false;service.gate(true);if(service.canInput()&&input==null)input=service.newForwarder();}
     }
-    void clearInput(){if(input!=null){input.close();input=null;}buttons=0;mouseKnown=false;}
+    void clearInput(){if(input!=null){input.close();input=null;}buttons=0;mouseKnown=false;touchActive=false;}
     private void suspend(){clearInput();if(service!=null)service.gate(false);}
-    void disconnected(){clearInput();if(source!=null){source.shutdown();source=null;}displayReady=false;status.setText("已断开；VM继续运行");}
+    void disconnected(){sourceLifetime.close();clearInput();if(source!=null){source.shutdown();source=null;}displayReady=false;status.setText("已断开；VM继续运行");}
     void updateStatus(){status.setText(service==null?"请先在设置连接路线":service.status()+"\nSurface: "+(displayReady?"已连接":"等待") );}
     private void fit(){int w=area.getWidth(),h=area.getHeight();if(w<=0||h<=0)return;if((long)w*height>(long)h*width)w=h*width/height;else h=w*height/width;surface.setLayoutParams(new FrameLayout.LayoutParams(w,h,Gravity.CENTER));}
     private boolean mouse(MotionEvent e){
