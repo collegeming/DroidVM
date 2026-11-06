@@ -1,0 +1,33 @@
+name: Native input lifecycle candidate
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  ownership:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - name: Test production descriptor owner
+        run: |
+          mkdir -p out/native-input-tests
+          javac --release 11 -d out/native-input-tests \
+            app/src/main/java/cn/classfun/droidvm/daemon/vm/backend/NativeInputSocketOwner.java \
+            app/src/test/java/cn/classfun/droidvm/daemon/vm/backend/NativeInputSocketOwnerTest.java
+          timeout 60s java -cp out/native-input-tests cn.classfun.droidvm.daemon.vm.backend.NativeInputSocketOwnerTest
+      - name: Test Linux listener wake and source lifecycle contracts
+        run: timeout 60s python3 -I app/src/test/python/test_native_input_listener.py
+      - uses: android-actions/setup-android@v3
+        with:
+          packages: 'platforms;android-37'
+      - name: Compile actual bridge with Android SDK and declared dependency stubs
+        run: |
+          python3 -I scripts/ci/compile_native_input_bridge.py "$ANDROID_HOME/platforms/android-37/android.jar" out/native-input-compile
+      - name: State validation scope
+        run: |
+          printf '%s\n' 'Production owner tests and Linux poll/HUP semantics only. Bridge SDK compilation uses dependency stubs; not full APK/JNI/device validation. Not proof of fdsan crash root cause or repair.'
