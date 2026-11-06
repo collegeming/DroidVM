@@ -12,6 +12,7 @@ public final class DisplayActivity extends Activity {
     private SurfaceView surface,cursor;
     private FrameLayout area;
     private TextView status;
+    private boolean statusExpanded;
     private NativeSurfaceSource source;
     private InputForwarder input;
     private boolean resumed,displayReady,ime,manualGate;
@@ -30,10 +31,14 @@ public final class DisplayActivity extends Activity {
         area=new FrameLayout(this);area.setBackgroundColor(0xff000000);
         surface=new SurfaceView(this);surface.setFocusableInTouchMode(true);area.addView(surface,new FrameLayout.LayoutParams(1,1,Gravity.CENTER));
         cursor=new SurfaceView(this);cursor.setZOrderMediaOverlay(true);cursor.getHolder().setFormat(android.graphics.PixelFormat.TRANSLUCENT);cursor.setX(-10000);cursor.setY(-10000);area.addView(cursor,new FrameLayout.LayoutParams(64,64));
-        status=new TextView(this);status.setTextColor(0xffffffff);status.setBackgroundColor(0x99000000);status.setTextSize(12);status.setPadding(12,8,12,8);
-        area.addView(status,new FrameLayout.LayoutParams(-2,-2,Gravity.TOP|Gravity.START));
-        Button settings=new Button(this);settings.setText("设置 / 释放");settings.setOnClickListener(v->startActivity(new Intent(this,SettingsActivity.class)));
-        area.addView(settings,new FrameLayout.LayoutParams(-2,-2,Gravity.TOP|Gravity.END));
+        status=new TextView(this);status.setTextColor(0xffffffff);status.setBackgroundColor(0xdd202020);status.setTextSize(12);status.setPadding(16,12,16,12);status.setVisibility(View.GONE);
+        FrameLayout.LayoutParams statusLayout=new FrameLayout.LayoutParams(-2,-2,Gravity.BOTTOM|Gravity.END);statusLayout.bottomMargin=64;
+        area.addView(status,statusLayout);
+        LinearLayout controls=new LinearLayout(this);
+        TextView info=new TextView(this);info.setText("状态");info.setTextColor(0xffffffff);info.setBackgroundColor(0x99202020);info.setPadding(16,12,16,12);
+        info.setOnClickListener(v->{statusExpanded=!statusExpanded;status.setVisibility(statusExpanded?View.VISIBLE:View.GONE);updateStatus();});controls.addView(info);
+        TextView settings=new TextView(this);settings.setText("设置");settings.setTextColor(0xffffffff);settings.setBackgroundColor(0x99202020);settings.setPadding(16,12,16,12);settings.setOnClickListener(v->startActivity(new Intent(this,SettingsActivity.class)));controls.addView(settings);
+        area.addView(controls,new FrameLayout.LayoutParams(-2,-2,Gravity.BOTTOM|Gravity.END));
         area.addOnLayoutChangeListener((v,l,t,r,b,ol,ot,or,ob)->fit());
         area.setOnApplyWindowInsetsListener((v,insets)->{boolean next=insets.isVisible(WindowInsets.Type.ime());if(ime!=next){ime=next;refreshGate();}return insets;});
         surface.setOnTouchListener((v,e)->{
@@ -64,7 +69,7 @@ public final class DisplayActivity extends Activity {
     }
     void refreshGate(){
         if(service==null)return;
-        boolean allowed=SessionPolicy.accepts(resumed,hasWindowFocus(),displayReady,ime,service.isManual());
+        boolean allowed=SessionPolicy.accepts(resumed,hasWindowFocus(),displayReady,ime,service.inputBlocked());
         if(!allowed){if(input!=null)clearInput();if(!manualGate){manualGate=true;service.gate(false);}}
         else{manualGate=false;service.gate(true);if(service.canInput()&&input==null)input=service.newForwarder();}
     }

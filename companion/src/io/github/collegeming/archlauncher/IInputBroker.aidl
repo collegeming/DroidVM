@@ -3,7 +3,7 @@ import android.os.IBinder;
 interface IInputBroker {
     long attach(String token, String vm, IBinder client);
     IBinder display(String token, long generation);
-    boolean write(String token, long generation, int channel, in byte[] bytes);
+    int write(String token, long generation, int channel, in byte[] bytes);
     void releaseAll(String token, long generation);
     void detach(String token, long generation);
 }

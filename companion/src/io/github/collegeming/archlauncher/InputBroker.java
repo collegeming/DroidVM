@@ -16,9 +16,11 @@ public final class InputBroker {
     private final Set<Integer>[] held = new Set[]{new HashSet<>(),new HashSet<>(),new HashSet<>(),new HashSet<>()};
     private final Set<Integer> modifiers = new HashSet<>();
     private final boolean[] dirty=new boolean[4];
-    private long sequence, generation;
+    private final BrokerGate gate=new BrokerGate();
+    private final Set<Integer> touchSlots=new HashSet<>();
+    private int touchSlot;
     private String vm;
-    private boolean released, releaseFailed;
+    private boolean releaseFailed;
     private IBinder client;
     private IBinder.DeathRecipient death;
     private final int uid;
@@ -29,7 +31,7 @@ public final class InputBroker {
         if(Binder.getCallingUid()!=uid || !java.security.MessageDigest.isEqual(token.getBytes(java.nio.charset.StandardCharsets.US_ASCII),String.valueOf(value).getBytes(java.nio.charset.StandardCharsets.US_ASCII)))
             throw new SecurityException("session denied");
     }
-    private boolean valid(long supplied) { return SessionPolicy.current(generation,supplied); }
+    private boolean valid(long supplied) { return gate.current(supplied); }
     private boolean send(int channel, byte[] bytes) {
         try {
             return daemon.request("vm_input",new JSONObject().put("vm_id",vm).put("screen","gpu-0")
@@ -48,20 +50,20 @@ public final class InputBroker {
             ByteArrayOutputStream out=new ByteArrayOutputStream();
             for(int key:held[ch])record(out,1,key,0);
             if(ch==0) {
-                for(int slot=0;slot<32;slot++){record(out,3,0x2f,slot);record(out,3,0x39,-1);}
+                for(int slot:touchSlots){record(out,3,0x2f,slot);record(out,3,0x39,-1);}
                 record(out,1,0x14a,0);
             }
             if(ch==2 || ch==3)for(int button=0x110;button<=0x114;button++)record(out,1,button,0);
             record(out,0,0,0);
-            if(send(ch,out.toByteArray())){held[ch].clear();dirty[ch]=false;}else releaseFailed=true;
+            if(send(ch,out.toByteArray())){held[ch].clear();dirty[ch]=false;if(ch==0){touchSlots.clear();touchSlot=0;}}else releaseFailed=true;
         }
         modifiers.clear();
     }
     private synchronized void retire(long expected) {
         if(!valid(expected))return;
-        released=true;
+        gate.pause(expected,BrokerGate.PAUSED);
         release();
-        generation=0;
+        gate.retire(expected);
         if(client!=null && death!=null)client.unlinkToDeath(death,0);
         client=null; death=null; vm=null;
     }
@@ -71,7 +73,7 @@ public final class InputBroker {
                 check(supplied);
                 synchronized(InputBroker.this) {
                     if(!SessionPolicy.allowed(target)||lifetime==null)throw new SecurityException("target denied");
-                    if(generation!=0)retire(generation);
+                    if(gate.generation()!=0)retire(gate.generation());
                     if(releaseFailed)throw new IllegalStateException("E_RELEASE_UNCONFIRMED");
                     try {
                         JSONObject config=daemon.request("vm_get",new JSONObject().put("vm_id",target)).getJSONObject("data");
@@ -79,8 +81,8 @@ public final class InputBroker {
                         if(!target.equals(config.getString("id"))||!"CROSVM".equals(config.getString("backend"))||!screen.optBoolean("enabled")||!screen.optBoolean("input_enabled")||!"native".equals(screen.optString("exporter")))throw new IOException();
                         if(!"running".equals(daemon.request("vm_status",new JSONObject().put("vm_id",target)).getString("state")))throw new IOException();
                     } catch(Exception ignored) { throw new IllegalStateException("E_VM_NOT_READY"); }
-                    vm=target; generation=++sequence; released=false;
-                    final long captured=generation;
+                    vm=target;
+                    final long captured=gate.attach();
                     client=lifetime;
                     death=()->{synchronized(InputBroker.this){if(!valid(captured))return;retire(captured);}};
                     try { client.linkToDeath(death,0); }
@@ -96,18 +98,19 @@ public final class InputBroker {
                         .invoke(null,"droidvm_disp_"+vm+"_gpu-0");}catch(Exception ignored){return null;}
                 }
             }
-            public boolean write(String supplied,long session,int channel,byte[] bytes) {
+            public int write(String supplied,long session,int channel,byte[] bytes) {
                 check(supplied);
                 synchronized(InputBroker.this) {
-                    if(!valid(session)||released||channel<0||channel>3||bytes==null||bytes.length==0||bytes.length>8192||bytes.length%8!=0)return false;
+                    int state=gate.status(session);if(state!=0)return state;
+                    if(channel<0||channel>3||bytes==null||bytes.length==0||bytes.length>8192||bytes.length%8!=0)return BrokerGate.INVALID;
                     ByteBuffer data=ByteBuffer.wrap(bytes).order(ByteOrder.LITTLE_ENDIAN);
                     while(data.remaining()>=8) {
                         int type=data.getShort()&65535,code=data.getShort()&65535,value=data.getInt();
-                        if(type>3)return false;
+                        if(type>3)return BrokerGate.INVALID;
                         if(channel==1 && type==1) {
                             if(value==0)modifiers.remove(code);else modifiers.add(code);
                             if(value!=0 && SessionPolicy.escape(code,modifiers.contains(29),modifiers.contains(97),modifiers.contains(56),modifiers.contains(100))) {
-                                released=true;release();return false;
+                                gate.pause(session,BrokerGate.ESCAPE);release();return BrokerGate.ESCAPE;
                             }
                         }
                     }
@@ -116,18 +119,20 @@ public final class InputBroker {
                     while(data.remaining()>=8) {
                         int type=data.getShort()&65535,code=data.getShort()&65535,value=data.getInt();
                         if(type==1 && value!=0)held[channel].add(code);
+                        if(channel==0&&type==3){if(code==0x2f)touchSlot=value;else if(code==0x39&&value>=0)touchSlots.add(touchSlot);}
                     }
                     dirty[channel]=true;
-                    if(!send(channel,bytes)){released=true;release();return false;}
+                    if(!send(channel,bytes)){gate.pause(session,BrokerGate.NOT_DELIVERED);release();return BrokerGate.NOT_DELIVERED;}
                     data.rewind();
                     while(data.remaining()>=8) {
                         int type=data.getShort()&65535,code=data.getShort()&65535,value=data.getInt();
                         if(type==1 && value==0)held[channel].remove(code);
+                        if(channel==0&&type==3){if(code==0x2f)touchSlot=value;else if(code==0x39&&value<0)touchSlots.remove(touchSlot);}
                     }
-                    return true;
+                    return BrokerGate.DELIVERED;
                 }
             }
-            public void releaseAll(String supplied,long session){check(supplied);synchronized(InputBroker.this){if(valid(session)){released=true;release();}}}
+            public void releaseAll(String supplied,long session){check(supplied);synchronized(InputBroker.this){if(gate.pause(session,BrokerGate.PAUSED)){release();}}}
             public void detach(String supplied,long session){check(supplied);retire(session);main.postDelayed(()->System.exit(0),50);}
         };
     }
@@ -144,10 +149,10 @@ public final class InputBroker {
         Bundle session=new Bundle(); session.putBinder("binder",owner.binder().asBinder());session.putString("token",token);
         // Retry only until attach; broadcasts are constrained to the package and checked by nonce.
         Handler handler=new Handler(Looper.getMainLooper());
-        handler.postDelayed(new Runnable(){public void run(){synchronized(owner){if(owner.generation!=0)return;}
+        handler.postDelayed(new Runnable(){public void run(){synchronized(owner){if(owner.gate.generation()!=0)return;}
             context.sendBroadcast(new Intent(ACTION).setPackage(PACKAGE).putExtra("session",session));handler.postDelayed(this,500);}},250);
-        new Thread(()->{try{while(control.readLine()!=null){}}catch(Exception ignored){}finally{synchronized(owner){if(owner.generation!=0)owner.retire(owner.generation);}System.exit(0);}},"broker-owner").start();
-        handler.postDelayed(()->{synchronized(owner){if(owner.generation==0)System.exit(0);}},15000);
+        new Thread(()->{try{while(control.readLine()!=null){}}catch(Exception ignored){}finally{synchronized(owner){if(owner.gate.generation()!=0)owner.retire(owner.gate.generation());}System.exit(0);}},"broker-owner").start();
+        handler.postDelayed(()->{synchronized(owner){if(owner.gate.generation()==0)System.exit(0);}},15000);
         Looper.loop();
     }
 }

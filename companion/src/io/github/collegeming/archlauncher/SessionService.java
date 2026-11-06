@@ -28,6 +28,9 @@ public final class SessionService extends Service {
     private volatile long inputEpoch;
     private volatile String detail="未连接";
     private volatile boolean delivered;
+    private int lastResult;
+    private boolean inputFault;
+    private long forwarderGeneration;
     private boolean receiverRegistered;
     private DisplayActivity display;
     private final BroadcastReceiver receiver=new BroadcastReceiver(){public void onReceive(Context c,Intent intent){
@@ -52,7 +55,7 @@ public final class SessionService extends Service {
             int requested=SessionPolicy.route(intent.getIntExtra("route",0));
             if(process==null&&!starting) {route=requested;manual=false;startBroker();}
             else if(requested!=route) {detail="切换路线前请先断开；VM不会被关闭";changed();}
-            else {manual=false;if(broker!=null&&!connected&&!preparing)prepare(false);else if(display!=null)display.refreshGate();changed();}
+            else {manual=false;inputFault=false;if(broker!=null&&!connected&&!preparing)prepare(false);else if(display!=null)display.refreshGate();changed();}
         }
         return START_NOT_STICKY;
     }
@@ -76,7 +79,8 @@ public final class SessionService extends Service {
     private void prepare(boolean enable){
         final IInputBroker b=broker;final String t=token;final long epoch=++localEpoch;
         if(b==null)return;
-        generation=0;armed=false;inputOpen=false;preparing=true;
+        generation=0;armed=false;inputOpen=false;preparing=true;forwarderGeneration=0;
+        if(display!=null)display.clearInput();
         control.execute(()->{
             try{
                 long next=b.attach(t,SessionPolicy.IDS[route],lifetime);
@@ -95,7 +99,8 @@ public final class SessionService extends Service {
     }
     void attachDisplay(DisplayActivity activity){display=activity;if(connected)activity.sessionReady();changed();}
     void removeDisplay(DisplayActivity activity){if(display==activity){gate(false);display=null;}}
-    boolean canInput(){return connected&&armed&&!manual&&generation>0;}
+    boolean canInput(){return connected&&armed&&!manual&&!inputFault&&generation>0;}
+    boolean inputBlocked(){return manual||inputFault;}
     boolean isConnected(){return connected;}
     boolean isManual(){return manual;}
     int route(){return route;}
@@ -106,7 +111,7 @@ public final class SessionService extends Service {
             if(b!=null&&g>0)control.execute(()->{try{b.releaseAll(t,g);}catch(Exception ignored){}});
             if(display!=null)display.clearInput();
             changed();
-        }else if(!manual&&connected&&!armed&&!preparing&&broker!=null)prepare(true);
+        }else if(!inputBlocked()&&connected&&!armed&&!preparing&&broker!=null)prepare(true);
     }
     android.os.IBinder displayBinder(){
         IInputBroker b=broker;String t=token;long g=generation;
@@ -114,11 +119,24 @@ public final class SessionService extends Service {
     }
     InputForwarder newForwarder(){
         final IInputBroker b=broker;final String t=token;final long g=generation,epoch=localEpoch;
+        forwarderGeneration=g;
         InputForwarder forwarder=new InputForwarder((channel,bytes)->{
             if(!inputOpen||epoch!=inputEpoch)return false;
-            boolean ok=false;try{ok=b.write(t,g,channel,bytes);}catch(Exception ignored){}
-            delivered=ok;
-            if(!ok)main.post(()->{if(epoch==localEpoch){manual=true;gate(false);detail="输入投递失败或逃生键释放；请在设置恢复";changed();}});
+            int result;try{result=b.write(t,g,channel,bytes);}catch(Exception ignored){result=BrokerGate.IPC_ERROR;}
+            final int outcome=result;
+            boolean ok=result==BrokerGate.DELIVERED;delivered=ok;
+            main.post(()->{
+                if(epoch!=localEpoch||g!=generation)return;
+                lastResult=outcome;
+                if(outcome!=BrokerGate.DELIVERED){
+                    // A stale worker is not an escape key or a user-requested manual release.
+                    inputFault=outcome!=BrokerGate.STALE;
+                    if(outcome==BrokerGate.ESCAPE)manual=true;
+                    gate(false);
+                    detail="输入暂停 ["+BrokerGate.label(outcome)+"] · ch="+channel+" · generation="+g+"；设置中可显式恢复";
+                    changed();
+                }
+            });
             return ok;
         });
         int mode=Math.max(0,Math.min(2,getSharedPreferences("settings",0).getInt("mode",0)));

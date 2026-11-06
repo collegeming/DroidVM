@@ -14,7 +14,10 @@ assert 'if(ctl!=null)' in fullscreen
 assert 'post(' not in fullscreen and 'postDelayed' not in fullscreen
 broker = (source/'InputBroker.java').read_text(encoding='utf-8')
 assert 'if(!valid(captured))return;' in broker
-assert 'if(!valid(session)||released' in broker
+assert 'int state=gate.status(session);if(state!=0)return state;' in broker
+assert 'for(int slot:touchSlots)' in broker
+assert 'slot<32' not in broker
+assert 'status.setVisibility(View.GONE)' in activity
 assert 'if(releaseFailed)throw' in broker
 assert '.getMethod("checkService",String.class)' in broker
 assert not any(cmd in broker for cmd in ['"vm_stop"','"vm_kill"','"vm_create"','"vm_start"'])
