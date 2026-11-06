@@ -22,7 +22,7 @@ final class ManagedStart {
             if(!host.configured())return BAD_PROFILE;
             if(!StartPolicy.knownDispatcher(host.dispatcherHash()))return UNKNOWN_RUNTIME;
             if(!StartPolicy.mayStart(host.state()))return NOT_READY;
-            try{host.start();}catch(Exception ignored){return START_FAILED;}
+            try{host.start();}catch(RpcFailure failure){return failure.code;}catch(Exception ignored){return START_FAILED;}
             while(budget.millis()>0){
                 state=host.state();
                 if(StartPolicy.attachOnly(state))return 1;
@@ -30,14 +30,15 @@ final class ManagedStart {
                 host.sleep();
             }
             return START_TIMEOUT;
-        }catch(Exception ignored){return DAEMON_UNHEALTHY;}
+        }catch(RpcFailure failure){return failure.code;}catch(Exception ignored){return DAEMON_UNHEALTHY;}
     }
     static String label(long result){
+        if(result<=RpcFailure.AUTH)return RpcFailure.label(result)+"（仅此连接失败；断开后可显式重试）";
         if(result==BAD_PROFILE)return "PROFILE_MISMATCH";
         if(result==UNKNOWN_RUNTIME)return "RUNTIME_SETUP_REQUIRED（未知launcher；请准备受控runtime）";
         if(result==START_FAILED)return "VM_START_FAILED（未采用其他启动方式）";
         if(result==START_TIMEOUT)return "VM_START_TIMEOUT";
-        if(result==DAEMON_UNHEALTHY)return "DAEMON_UNHEALTHY（请由管理端检查；不会自动重启）";
+        if(result==DAEMON_UNHEALTHY)return "ATTACH_CHECK_FAILED（仅此连接失败；请检查后显式重试）";
         if(result==RELEASE_UNCONFIRMED)return "INPUT_RELEASE_UNCONFIRMED";
         return "VM_NOT_READY";
     }

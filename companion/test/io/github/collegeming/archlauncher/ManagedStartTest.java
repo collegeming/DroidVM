@@ -4,12 +4,12 @@ import java.util.concurrent.TimeUnit;
 public final class ManagedStartTest {
     static void check(boolean ok){if(!ok)throw new AssertionError();}
     static final class Host implements ManagedStart.Host {
-        boolean config=true,failPing,failStart;String hash=StartPolicy.DISPATCHER_SHA;
+        boolean config=true,failPing,failStart;long rpcFailure;String hash=StartPolicy.DISPATCHER_SHA;
         final List<String> states=new ArrayList<>();int starts,reads;long[] time={0};
         Host(String... states){this.states.addAll(Arrays.asList(states));}
         public boolean configured(){return config;}
         public String dispatcherHash(){return hash;}
-        public void ping()throws Exception{if(failPing)throw new Exception();}
+        public void ping()throws Exception{if(rpcFailure!=0)throw new RpcFailure(rpcFailure);if(failPing)throw new Exception();}
         public String state(){return states.get(Math.min(reads++,states.size()-1));}
         public void start()throws Exception{starts++;if(failStart)throw new Exception();}
         public void sleep(){time[0]+=TimeUnit.MILLISECONDS.toNanos(250);}
@@ -34,6 +34,8 @@ public final class ManagedStartTest {
         Host fail=new Host("stopped","stopped");fail.failStart=true;check(fail.run(true)==ManagedStart.START_FAILED&&fail.starts==1);
         Host timeout=new Host("stopped","stopped","starting");check(timeout.run(true)==ManagedStart.START_TIMEOUT&&timeout.starts==1);
         Host unhealthy=new Host("stopped");unhealthy.failPing=true;check(unhealthy.run(true)==ManagedStart.DAEMON_UNHEALTHY&&unhealthy.starts==0);
+        Host phase=new Host("running");phase.rpcFailure=RpcFailure.STATUS;check(phase.run(false)==RpcFailure.STATUS);check(ManagedStart.label(RpcFailure.STATUS).startsWith("VM_STATUS_TIMEOUT_OR_IO"));
+        check(!BrokerGate.label((int)RpcFailure.INPUT).equals(BrokerGate.label(BrokerGate.NOT_DELIVERED)));
         System.out.println("Managed start: fixed route/profile/unique guard/dispatcher allowlist, running attach-only, stopped start-once, no fallback, health and total poll timeout passed");
     }
 }
