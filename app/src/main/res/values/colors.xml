@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="nullptr">#00000000</color>
+    <color name="black">#FF000000</color>
+
+    <color name="vnc_background">#FF333333</color>
+    <color name="vnc_status_bar_background">#FF1A1A1A</color>
+    <color name="vnc_status_connected">#FF4CAF50</color>
+    <color name="vnc_status_error">#FFFF5252</color>
+    <color name="vnc_status_connecting">#FFFF9800</color>
+
+    <color name="extra_keys_background">#FF222222</color>
+    <color name="extra_key_text">#FFCCCCCC</color>
+    <color name="extra_key_text_active">#FF4FC3F7</color>
+    <color name="extra_key_bg_active">#FF37474F</color>
+    <!-- Pressed key feedback: the key surface is always dark, so pressed always lightens. -->
+    <color name="extra_key_bg_pressed">#FF777777</color>
+
+    <color name="vnc_fab_background">#FF4FC3F7</color>
+    <color name="vnc_touchpad_background">#FF2A2A2A</color>
+
+    <color name="daemon_card_background_running">#FFDFFAE4</color>
+    <color name="daemon_card_background_checking">#FFFFF9E0</color>
+    <color name="daemon_card_background_stopped">#FFFADFE0</color>
+
+    <color name="kernel_analysis_title">#FF1976D2</color>
+
+    <color name="hugepage_bar_track">#33808080</color>
+    <color name="hugepage_pending">#807D9CB3</color>
+    <!-- v10 CMA reservoir: the part apps currently occupy vs the free part. -->
+    <color name="hugepage_cma_used">#80C98B5E</color>
+    <color name="hugepage_cma_free">#805FA79E</color>
+    <!-- Avail sub-split: pages NOT flippable to CMA as whole pageblocks. -->
+    <color name="hugepage_avail_non_cma">#59708090</color>
+
+    <!-- Inline supported/unsupported status icons (readable on light and dark). -->
+    <color name="status_supported">#FF4CAF50</color>
+    <color name="status_unsupported">#FFF44336</color>
+
+    <color name="vmpkg_export_disk_selected">#FF888888</color>
+</resources>

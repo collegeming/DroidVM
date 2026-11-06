@@ -1,0 +1,65 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright DroidVM contributors
+// Additional permissions apply; see ADDITIONAL-PERMISSIONS in the repository root.
+package cn.classfun.droidvm.lib.store.vm;
+
+import androidx.annotation.StringRes;
+
+import cn.classfun.droidvm.R;
+import cn.classfun.droidvm.lib.store.enums.StringEnum;
+
+public enum GpuApi implements StringEnum {
+    NONE(0, "none", R.string.nullptr),
+    VULKAN(1, "vulkan", R.string.create_vm_gpu_api_vulkan),
+    EGL(2, "egl", R.string.create_vm_gpu_api_egl),
+    OPENGLES(3, "gles", R.string.create_vm_gpu_api_opengles),
+    ANGLE(4, "angle", R.string.create_vm_gpu_api_angle),
+    // gfxstream host Vulkan driver (ANDROID_EMU_VK_LOADER_PATH). SYSTEM = the SoC's stock
+    // Vulkan HAL; TURNIP = bundled Mesa turnip (Adreno); PANVK = Mesa PanVK (Mali) -- not yet wired.
+    VULKAN_SYSTEM(5, "vulkan-system", R.string.create_vm_gpu_api_vulkan_system),
+    VULKAN_TURNIP(6, "vulkan-turnip", R.string.create_vm_gpu_api_vulkan_turnip),
+    VULKAN_PANVK(7, "vulkan-panvk", R.string.create_vm_gpu_api_vulkan_panvk),
+    // virglrenderer DRM native context: the guest runs its own turnip over vdrm and
+    // virglrenderer translates the msm protocol to KGSL ioctls. Not a translation API like the
+    // others -- nothing is remoted at the GL/VK level -- but it is the same choice for the user:
+    // how the guest reaches the GPU.
+    DRM2KGSL(8, "drm2kgsl", R.string.create_vm_gpu_api_drm2kgsl);
+
+    private final int value;
+    private final String name;
+    private final @StringRes int stringId;
+
+    GpuApi(int value, String name, @StringRes int stringId) {
+        this.value = value;
+        this.name = name;
+        this.stringId = stringId;
+    }
+
+    @SuppressWarnings("unused")
+    public int getValue() {
+        return value;
+    }
+
+    @SuppressWarnings("unused")
+    public String getName() {
+        return name;
+    }
+
+    @SuppressWarnings("unused")
+    public static GpuApi fromValue(int value) {
+        for (var v : values())
+            if (v.value == value) return v;
+        return NONE;
+    }
+
+    @Override
+    @StringRes
+    public int getStringId() {
+        return stringId;
+    }
+
+    @Override
+    public boolean isDisplay() {
+        return stringId != R.string.nullptr;
+    }
+}

@@ -1,0 +1,399 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright DroidVM contributors
+// Additional permissions apply; see ADDITIONAL-PERMISSIONS in the repository root.
+package cn.classfun.droidvm.lib.utils;
+
+import static android.os.Build.SUPPORTED_ABIS;
+import static cn.classfun.droidvm.lib.Constants.*;
+import static cn.classfun.droidvm.lib.utils.FileUtils.*;
+import static cn.classfun.droidvm.lib.utils.StringUtils.fmt;
+import static cn.classfun.droidvm.lib.utils.StringUtils.pathJoin;
+
+import android.annotation.SuppressLint;
+import android.content.Context;
+import android.util.Log;
+
+import androidx.annotation.NonNull;
+import androidx.annotation.Nullable;
+
+import org.json.JSONException;
+import org.json.JSONObject;
+import org.tukaani.xz.XZInputStream;
+import org.yaml.snakeyaml.Yaml;
+
+import java.io.BufferedInputStream;
+import java.io.File;
+import java.io.FileInputStream;
+import java.io.FileOutputStream;
+import java.io.IOException;
+import java.io.InputStream;
+import java.util.ArrayList;
+
+import cn.classfun.droidvm.lib.archive.TarReader;
+import cn.classfun.droidvm.lib.crypt.HashFile;
+
+public final class AssetUtils {
+    private static final String TAG = "AssetsUtils";
+    private static String prebuiltAsset = null;
+    private static String prebuiltHash = null;
+
+    private AssetUtils() {
+    }
+
+    @NonNull
+    private static String getPrebuiltAsset(@NonNull Context context) {
+        if (prebuiltAsset != null) return prebuiltAsset;
+        for (var abi : SUPPORTED_ABIS) {
+            var name = fmt("prebuilts/prebuilt-%s.tar.xz", abi);
+            if (checkAssetsExists(context, name)) {
+                prebuiltAsset = name;
+                return name;
+            }
+        }
+        throw new RuntimeException("No prebuilt asset found for supported ABIs");
+    }
+
+    @NonNull
+    private static String getPrebuiltHash(@NonNull Context context) {
+        if (prebuiltHash != null) return prebuiltHash;
+        for (var abi : SUPPORTED_ABIS) {
+            var name = fmt("prebuilts/prebuilt-%s.json", abi);
+            if (checkAssetsExists(context, name)) {
+                prebuiltHash = name;
+                return name;
+            }
+        }
+        throw new RuntimeException("No prebuilt asset found for supported ABIs");
+    }
+
+    @Nullable
+    public static <T> T loadYAMLFromAssets(
+        @NonNull Context context,
+        @NonNull String assetName
+    ) throws IOException {
+        try (var is = context.getAssets().open(assetName)) {
+            var yaml = new Yaml();
+            return yaml.load(is);
+        }
+    }
+
+    @NonNull
+    public static JSONObject loadJSONFromAssets(
+        @NonNull Context context,
+        @NonNull String assetName
+    ) throws IOException, JSONException {
+        return new JSONObject(loadFromAssets(context, assetName));
+    }
+
+    @NonNull
+    public static String loadFromAssets(
+        @NonNull Context context,
+        @NonNull String assetName
+    ) throws IOException {
+        try (var is = context.getAssets().open(assetName)) {
+            return new String(is.readAllBytes());
+        }
+    }
+
+    public static boolean checkAssetsExists(
+        @NonNull Context context,
+        @NonNull String assetName
+    ) {
+        try {
+            context.getAssets().open(assetName).close();
+            return true;
+        } catch (Exception ignored) {
+            return false;
+        }
+    }
+
+    @NonNull
+    private static String getAssetHash(
+        @NonNull Context context,
+        @NonNull String file,
+        boolean hashFile
+    ) {
+        if (hashFile) try {
+            var hash = new HashFile(loadJSONFromAssets(context, "hash.json"));
+            return hash.lookupSHA256(file);
+        } catch (Exception e) {
+            Log.w(TAG, fmt("Failed to load assets hash.json for %s", file), e);
+        }
+        try {
+            String hash = calcHashForAsset(context, file, "SHA-256");
+            Log.i(TAG, fmt("Calculated hash for asset %s: %s", file, hash));
+            return hash;
+        } catch (Exception e) {
+            Log.w(TAG, fmt("Failed to calculate hash for asset: %s", file), e);
+        }
+        throw new RuntimeException(fmt("Failed to get asset hash for %s", file));
+    }
+
+    private static boolean needsExtract(
+        @NonNull Context context,
+        @NonNull String from,
+        @NonNull String to,
+        boolean hashFile
+    ) {
+        var file = new File(context.getDataDir(), to);
+        if (!file.exists()) return true;
+        try {
+            var expectedHash = getAssetHash(context, from, hashFile);
+            var currentHash = getFileHash(context, to, false);
+            return !currentHash.equalsIgnoreCase(expectedHash);
+        } catch (Exception e) {
+            return true;
+        }
+    }
+
+    public static boolean needsExtract(
+        @NonNull Context context,
+        @NonNull String name,
+        boolean hashFile,
+        @NonNull String type
+    ) {
+        return needsExtract(
+            context,
+            pathJoin(type, SUPPORTED_ABIS[0], name),
+            pathJoin(type, name),
+            hashFile
+        );
+    }
+
+    public static void extractAsset(
+        @NonNull Context context,
+        String type,
+        String[] targets,
+        boolean hashFile
+    ) {
+        final var tgtDir = new File(context.getDataDir(), type);
+        if (!tgtDir.exists() && tgtDir.mkdirs())
+            Log.d(TAG, fmt("Created %s directory for %s", type, tgtDir));
+        final var localHashFile = new File(context.getDataDir(), "hash.json");
+        final var localHash = HashFile.loadOrCreate(localHashFile);
+        for (var name : targets) {
+            if (!needsExtract(context, name, hashFile, type)) {
+                Log.d(TAG, fmt("%s %s is up to date, skipping extraction", type, name));
+                continue;
+            }
+            final var tgtAsset = pathJoin(type, SUPPORTED_ABIS[0], name);
+            final var tgtFile = new File(context.getDataDir(), pathJoin(type, name));
+            Log.i(TAG, fmt("Extracting %s %s from asset %s", name, type, tgtAsset));
+            if (tgtFile.exists() && tgtFile.delete())
+                Log.d(TAG, fmt("Deleted old %s file: %s", type, tgtFile));
+            Log.d(TAG, context.getApplicationInfo().nativeLibraryDir);
+            try (var in = context.getAssets().open(tgtAsset);
+                var out = new FileOutputStream(tgtFile)) {
+                copyStream(in, out);
+            } catch (IOException e) {
+                Log.e(TAG, fmt("Failed to extract: %s", tgtAsset), e);
+                continue;
+            }
+            if (!tgtFile.setExecutable(true, false))
+                Log.w(TAG, fmt("Failed to set executable permission on %s", tgtFile));
+            var hash = getAssetHash(context, tgtAsset, hashFile);
+            localHash.put(pathJoin(type, name), hash);
+        }
+        try {
+            localHash.save(localHashFile);
+        } catch (Exception e) {
+            Log.e(TAG, "Failed to save local hash.json", e);
+        }
+    }
+
+    public static void extractBinaries(@NonNull Context context) {
+        // Only the CMake-built binaries (droidvm, daemon) ship as APK assets.
+        // The third-party daemons and lbx now arrive via the prebuilt tar.xz
+        // (extracted to DATA/bin/<name>), and 7za has been removed entirely.
+        extractAsset(context, "bin", BINARIES_BUILT, false);
+    }
+
+    @SuppressLint("SetWorldReadable")
+    public static void extractLibraries(@NonNull Context context) {
+        var srcDir = new File(context.getApplicationInfo().nativeLibraryDir);
+        var srcFiles = srcDir.listFiles((dir, name) -> name.endsWith(".so"));
+        if (srcFiles == null || srcFiles.length == 0) {
+            Log.w(TAG, fmt("No installed native library in %s", srcDir));
+            return;
+        }
+        var dstDir = new File(context.getDataDir(), "lib");
+        if (!dstDir.exists() && !dstDir.mkdirs())
+            Log.w(TAG, fmt("Failed to create native library dir: %s", dstDir));
+        for (var src : srcFiles) {
+            var dst = new File(dstDir, src.getName());
+            try {
+                if (dst.exists() && !dst.delete())
+                    Log.w(TAG, fmt("Could not unlink old native library: %s", dst));
+                try (var in = new FileInputStream(src); var out = new FileOutputStream(dst)) {
+                    copyStream(in, out);
+                }
+                if (!dst.setReadable(true, false))
+                    Log.w(TAG, "setReadable failed");
+                Log.i(TAG, fmt("Extracted installed native library %s to %s", src, dst));
+            } catch (Exception e) {
+                Log.e(TAG, fmt("Failed to extract installed native library: %s", src), e);
+            }
+        }
+    }
+
+    public static boolean needsExtractPrebuilt(@NonNull Context context) {
+        var localHashFile = new File(context.getDataDir(), "hash.json");
+        if (!localHashFile.exists()) return true;
+        try {
+            var asset = getPrebuiltAsset(context);
+            var hash = getPrebuiltHash(context);
+            var localHash = new HashFile(localHashFile);
+            var storedHash = localHash.lookupSHA256(asset);
+            var assetHash = getAssetHash(context, asset, true);
+            if (!storedHash.equalsIgnoreCase(assetHash)) return true;
+            var prebuiltHash = new HashFile(loadJSONFromAssets(context, hash));
+            for (var item : prebuiltHash.values()) {
+                var localFile = new File(context.getDataDir(), item.file);
+                if (!localFile.exists()) return true;
+                var localHashValue = getFileHash(context, item.file, false);
+                if (!localHashValue.equalsIgnoreCase(item.sha256)) {
+                    Log.i(TAG, fmt("File %s hash mismatch, needs extraction", item.file));
+                    return true;
+                }
+            }
+        } catch (Exception e) {
+            Log.d(TAG, "Prebuilt hash check failed, extraction needed", e);
+            return true;
+        }
+        return false;
+    }
+
+    public static void cleanupPrebuilt(@NonNull Context context) {
+        var localHashFile = new File(context.getDataDir(), "hash.json");
+        if (!localHashFile.exists()) return;
+        HashFile localHash = null;
+        try {
+            localHash = new HashFile(localHashFile);
+        } catch (Exception e) {
+            Log.d(TAG, "Prebuilt cleanup failed", e);
+        }
+        if (localHash == null) return;
+        var cleanups = new ArrayList<String>();
+        for (var item : localHash.values())
+            try {
+                if (item.source == null || !item.source.equals("prebuilt")) continue;
+                var localFile = new File(context.getDataDir(), item.file);
+                if (localFile.exists() && localFile.delete())
+                    Log.d(TAG, fmt("Deleted prebuilt file: %s", localFile));
+                else
+                    Log.d(TAG, fmt("Skip delete prebuilt file: %s", localFile));
+                cleanups.add(item.file);
+            } catch (Exception e) {
+                Log.d(TAG, fmt("Failed to delete prebuilt file: %s", item.file), e);
+            }
+        for (var file : cleanups)
+            localHash.remove(file);
+        try {
+            localHash.save(localHashFile);
+        } catch (Exception e) {
+            Log.d(TAG, "Failed to save local hash.json after cleanup", e);
+        }
+    }
+
+    /**
+     * Serialises extraction. This writes into the data dir, so two callers at once are two
+     * writers interleaving mkdir and file creation on the same tree -- observed as one thread
+     * failing on "Failed to mkdir .../usr/bin" while the other completed, two milliseconds
+     * apart. The up-to-date check inside the lock is what makes the second caller cheap: by the
+     * time it gets in, the work is done and it returns immediately.
+     *
+     * <p>Held here rather than at each call site because "only one extraction at a time" is a
+     * property of the operation, not something every caller should have to remember.
+     */
+    private static final Object EXTRACT_LOCK = new Object();
+
+    public static void extractPrebuilt(
+        @NonNull Context context
+    ) throws IOException, JSONException {
+        synchronized (EXTRACT_LOCK) {
+            extractPrebuiltLocked(context);
+        }
+    }
+
+    private static void extractPrebuiltLocked(
+        @NonNull Context context
+    ) throws IOException, JSONException {
+        if (!needsExtractPrebuilt(context)) {
+            Log.d(TAG, "Prebuilt archive is up to date, skipping extraction");
+            return;
+        }
+        var asset = getPrebuiltAsset(context);
+        var hash = getPrebuiltHash(context);
+        cleanupPrebuilt(context);
+        var prebuiltHash = new HashFile(loadJSONFromAssets(context, hash));
+        var dataDir = context.getDataDir();
+        Log.i(TAG, fmt("Extracting %s to %s", asset, dataDir.getAbsolutePath()));
+        // Decompress the runtime payload in-process: XZ (org.tukaani:xz) + a
+        // minimal USTAR reader -- no 7za binary, no temp copy. Files are written
+        // by this (app-uid) process so they need no chown; bin/ and usr/bin/
+        // entries are made executable for the root daemon to run.
+        try (var in = context.getAssets().open(asset)) {
+            extractTarXz(in, dataDir);
+        }
+        Log.i(TAG, "Prebuilt extraction completed successfully");
+        var localHashFile = new File(dataDir, "hash.json");
+        var localHash = HashFile.loadOrCreate(localHashFile);
+        try {
+            for (var item : prebuiltHash.values())
+                localHash.put(item.file, "prebuilt", item.sha256);
+            var assetHash = getAssetHash(context, asset, true);
+            localHash.put(asset, assetHash);
+            localHash.save(localHashFile);
+        } catch (Exception e) {
+            Log.w(TAG, "Failed to update local hash after prebuilt extraction", e);
+        }
+    }
+
+    @SuppressLint("SetWorldReadable")
+    @SuppressWarnings({"ResultOfMethodCallIgnored", "OctalInteger"})
+    private static void extractTarXz(@NonNull InputStream rawIn, @NonNull File destRoot)
+        throws IOException {
+        try (
+            var xz = new XZInputStream(new BufferedInputStream(rawIn));
+            var tar = new TarReader(xz)
+        ) {
+            tar.forEach((name, mode, size, content) -> {
+                var outFile = new File(destRoot, name);
+                var parent = outFile.getParentFile();
+                if (parent != null && !parent.isDirectory() && !parent.mkdirs())
+                    throw new IOException(fmt("Failed to mkdir %s", parent));
+                if (outFile.exists() && !outFile.delete())
+                    Log.w(TAG, fmt("Could not unlink existing %s before extract", outFile));
+                try (var os = new FileOutputStream(outFile)) {
+                    copyStream(content, os);
+                }
+                outFile.setReadable(true, false);
+                if ((mode & 0111) != 0 || name.startsWith("bin/") || name.startsWith("usr/bin/"))
+                    outFile.setExecutable(true, false);
+            });
+        } catch (IOException e) {
+            throw e;
+        } catch (Exception e) {
+            throw new IOException("Failed to extract tar.xz", e);
+        }
+    }
+
+    public static boolean isAssetFileExists(@NonNull Context context, @NonNull String assetName) {
+        try {
+            context.getAssets().open(assetName).close();
+            return true;
+        } catch (IOException e) {
+            return false;
+        }
+    }
+
+    @NonNull
+    public static String getAssetBinaryPath(@NonNull String name) {
+        return pathJoin(DATA_DIR, "bin", name);
+    }
+
+    @NonNull
+    public static String getPrebuiltBinaryPath(@NonNull String name) {
+        return pathJoin(DATA_DIR, "usr", "bin", name);
+    }
+}
