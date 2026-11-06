@@ -15,6 +15,7 @@ final class PhysicalGrab {
     private final Object lock=lease;
     private final Map<String,Grab> grabs=new LinkedHashMap<>();
     private long generation;
+    private int releasePreset=2;
     private String reason="not requested";
     private boolean loaded;
     private final ScheduledExecutorService hotplug=Executors.newSingleThreadScheduledExecutor();
@@ -31,7 +32,7 @@ final class PhysicalGrab {
                     int ready=UnixHelper.nativePollIn2(fd,readWake,-1);if(ready<0||(ready&2)!=0)break;if((ready&1)==0)continue;
                     int length=UnixHelper.nativeRead(fd,bytes,bytes.length);if(length<=0)break;
                     GrabPolicy.Frame frame;
-                    synchronized(lock){if(stopping||generation!=session||grabs.get(device.path)!=this)break;frame=GrabPolicy.convert(bytes,length,pressed);}
+                    synchronized(lock){if(stopping||generation!=session||grabs.get(device.path)!=this)break;frame=GrabPolicy.convert(bytes,length,pressed,releasePreset);}
                     if(frame.escape){release(session,"ESCAPE_RELEASED");sink.released(session,"ESCAPE_RELEASED");return;}
                     if(frame.bytes.length>0&&!stopping)sink.records(session,frame.bytes);
                 }
@@ -46,12 +47,12 @@ final class PhysicalGrab {
         }
     }
     void publish(long session){lease.publish(session,()->{stopLocked();generation=0;reason="not requested";});}
-    String arm(long session){
+    String arm(long session,int preset){
         try{
             UnixHelper.load();loaded=UnixHelper.isLoaded();
             if(!loaded){synchronized(lock){if(lease.current(session))reason="NATIVE_HELPER_UNAVAILABLE";}return status();}
             // Publication, authorization and mutation share the very same monitor. Stale arm never stops a newer grab.
-            if(!lease.arm(session,()->{generation=session;reason="armed";}))return status();
+            if(!lease.arm(session,()->{releasePreset=HotkeyPolicy.preset(preset,2);generation=session;reason="armed";}))return status();
             rescan();return status();
         }catch(Throwable ignored){synchronized(lock){if(lease.current(session))reason="GRAB_UNAVAILABLE";}return status();}
     }
@@ -75,6 +76,7 @@ final class PhysicalGrab {
     }
     void release(long session,String why){lease.revoke(session,()->{stopLocked();generation=0;reason=why;});}
     private void stopLocked(){for(Grab grab:grabs.values())grab.stop();grabs.clear();}
+    boolean releaseChord(long session,int code,boolean ctrl,boolean alt){synchronized(lock){return HotkeyPolicy.release(generation==session?releasePreset:2,code,ctrl,alt);}}
     boolean held(String name,int vendor,int product){synchronized(lock){for(Grab grab:grabs.values())if(!grab.stopping&&grab.device.name.equals(name)&&grab.device.vendor==vendor&&grab.device.product==product)return true;return false;}}
     String status(){
         try{synchronized(lock){JSONObject out=new JSONObject().put("generation",generation).put("reason",reason).put("implemented",true);JSONArray held=new JSONArray();for(Grab grab:grabs.values())if(!grab.stopping)held.put(grab.device.toJson());return out.put("held",held).toString();}}

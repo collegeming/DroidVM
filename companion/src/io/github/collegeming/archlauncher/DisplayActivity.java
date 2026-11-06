@@ -13,6 +13,7 @@ public final class DisplayActivity extends Activity {
     private FrameLayout area;
     private TextView status;
     private boolean statusExpanded;
+    private int swallowedHotkey=-1;
     private NativeSurfaceSource source;
     private final SourceLifetime sourceLifetime=new SourceLifetime();
     private InputForwarder input;
@@ -94,8 +95,17 @@ public final class DisplayActivity extends Activity {
         return true;
     }
     public boolean dispatchKeyEvent(KeyEvent e){
-        if(e.getKeyCode()==KeyEvent.KEYCODE_F12 && e.isCtrlPressed()&&e.isAltPressed()){
-            if(e.getAction()==KeyEvent.ACTION_DOWN)startService(new Intent(this,SessionService.class).setAction(SessionService.RELEASE));return true;
+        if(e.getKeyCode()==swallowedHotkey){if(e.getAction()==KeyEvent.ACTION_UP)swallowedHotkey=-1;return true;}
+        if(resumed&&hasWindowFocus()&&displayReady&&!ime&&service!=null&&e.getAction()==KeyEvent.ACTION_DOWN){
+            android.content.SharedPreferences prefs=getSharedPreferences("settings",0);
+            int enter=HotkeyPolicy.preset(prefs.getInt("enter_hotkey",1),1),release=HotkeyPolicy.preset(prefs.getInt("release_hotkey",2),2);
+            int scan=KeyCodeMapper.androidToEvdev(e.getKeyCode());
+            int action=HotkeyPolicy.action(enter,release,scan,e.isCtrlPressed(),e.isAltPressed(),service.canInput());
+            if(action!=HotkeyPolicy.NONE){
+                swallowedHotkey=e.getKeyCode();
+                if(e.getRepeatCount()==0){if(action==HotkeyPolicy.RELEASE)service.releaseByHotkey();else service.resumeByHotkey();}
+                return true;
+            }
         }
         if(e.getKeyCode()==KeyEvent.KEYCODE_BACK){if(e.getAction()==KeyEvent.ACTION_UP)startActivity(new Intent(this,SettingsActivity.class));return true;}
         if(e.getKeyCode()==KeyEvent.KEYCODE_VOLUME_DOWN||e.getKeyCode()==KeyEvent.KEYCODE_VOLUME_UP)return super.dispatchKeyEvent(e);
@@ -111,7 +121,7 @@ public final class DisplayActivity extends Activity {
         View decor=getWindow().getDecorView();
         if(!decor.isAttachedToWindow())return;
         WindowInsetsController ctl=decor.getWindowInsetsController();
-        if(ctl!=null){ctl.setSystemBarsBehavior(WindowInsetsController.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE);ctl.hide(WindowInsets.Type.systemBars());}
+        if(ctl!=null){ctl.setSystemBarsBehavior(WindowInsetsController.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE);if(getSharedPreferences("settings",0).getBoolean("immersive",true))ctl.hide(WindowInsets.Type.systemBars());else ctl.show(WindowInsets.Type.systemBars());}
     }
     protected void onResume(){super.onResume();resumed=true;manualGate=false;main.post(findSession);getWindow().getDecorView().post(this::applyFullscreen);refreshGate();}
     protected void onPause(){resumed=false;main.removeCallbacks(findSession);suspend();super.onPause();}
