@@ -25,6 +25,10 @@ assert 'int state=gate.status(session);if(state!=0)return state;' in broker
 assert 'for(int slot:touchSlots)' in broker
 assert 'slot<32' not in broker
 assert 'status.setVisibility(View.GONE)' in activity
+assert 'setOnCapturedPointerListener' in activity
+assert 'AXIS_RELATIVE_X' in activity and 'AXIS_RELATIVE_Y' in activity
+assert 'surface.hasPointerCapture()' in activity
+assert 'void clearInput(){chordCycle.reset();stopPointerCapture();' in activity
 assert 'if(releaseFailed)return ManagedStart.RELEASE_UNCONFIRMED;' in broker
 assert '.getMethod("checkService",String.class)' in broker
 assert not any(cmd in broker for cmd in ['"vm_stop"','"vm_kill"','"vm_create"'])
