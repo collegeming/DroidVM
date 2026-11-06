@@ -21,7 +21,7 @@
       "disk": {"path": "/storage/emulated/0/DroidVM/VMs/Arch-PanVK/root.qcow2", "backend_path": "/data/media/0/DroidVM/VMs/Arch-PanVK/root.qcow2", "dev": 212, "ino": 527919, "format": "qcow2", "backing": null},
       "kernel": {"path": "/storage/emulated/0/DroidVM/VMs/Arch-PanVK/boot/Image", "sha256": "80af1fe7be83a08d5392b83383342cf32b1f278f6d8675d75dc4617b047a09b9"},
       "initrd": {"path": "/storage/emulated/0/DroidVM/VMs/Arch-PanVK/boot/initramfs.img", "sha256": "7d7aafd8a62066c090b4fcd84191c11f8eea72f4efdb8713328bfd4123b144d5"},
-      "runtime": {"path": "/data/local/tmp/panvk-stability-v1/bin/crosvm-native-alpha", "sha256": "c7abb915fb1404feefd208ceb18e5b0069c18a71867dbe4a1fb5eda5e82c13e7"},
+      "runtime": {"path": "/data/data/cn.classfun.droidvm/files/runtimes/panvk-v1/bin/crosvm", "sha256": "5ffa5db24cd388211c4cf18b2df02499d68334a43bc317074e92b384a5d19f29"},
       "libraries": [{"path": "/data/local/tmp/panvk-stability-v1/lib/libvirglrenderer.so", "sha256": "22e1c7df223edcd10b374f419ff50149fa24e846ae7bfc5be18c66634db7c51c"}, {"path": "/data/data/cn.classfun.droidvm/lib/libcompat_a17.so", "sha256": "c5118363064469269a4e1a176e59c68ec2d3407188d4d8ce182c8e423ee1ec0e"}, {"path": "/data/data/cn.classfun.droidvm/lib/libsimpledump.so", "sha256": "a4da78084c8527665a7d241900d602e9d2b189218d68a8673bb1c93b5773b3f9"}],
       "library_path": "/data/local/tmp/panvk-stability-v1/lib:/data/data/cn.classfun.droidvm/usr/lib:/system/lib64",
       "environment": {"PANVK_PRESENT_PROFILE": "1", "GPU_DISPLAY_COPY_MODE": "cpu", "VKR_TEST_KBASE_NATIVE": "1", "VKR_TEST_KBASE_MAX_BO": "1024", "VKR_TEST_KBASE_MAX_MB": "1024", "RUST_LOG": "info"},
