@@ -1,0 +1,56 @@
+name: Runtime profile compatibility
+on:
+  workflow_dispatch:
+    inputs:
+      enrollment_inventory:
+        description: 'Optional reviewed inventory JSON; enables candidate only if offline gates pass'
+        required: false
+        type: string
+  push:
+    branches: [unified-vm-profiles-v1]
+    paths: ['runtime-profiles/**', '.github/workflows/runtime-profiles.yml']
+permissions:
+  contents: read
+jobs:
+  test-build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Test native exec and offline enrollment (no device)
+        run: |
+          python3 -I runtime-profiles/test_profiles.py
+          python3 -I runtime-profiles/test_preflight.py
+      - name: Compile reviewed baseline or explicitly enrolled candidate for Android aarch64
+        shell: bash
+        env:
+          ENROLLMENT_INVENTORY: ${{ inputs.enrollment_inventory }}
+        run: |
+          set -euo pipefail
+          mkdir -p out
+          if [ -n "$ENROLLMENT_INVENTORY" ]; then
+            printf '%s' "$ENROLLMENT_INVENTORY" > out/enrollment-inventory.json
+            python3 -I runtime-profiles/enroll.py out/enrollment-inventory.json --output out/enrolled-manifest.json
+            python3 -I runtime-profiles/build_manifest.py --manifest out/enrolled-manifest.json
+            cp out/enrolled-manifest.json out/manifest.json
+          else
+            python3 -I runtime-profiles/build_manifest.py
+            cp runtime-profiles/manifest.json out/manifest.json
+          fi
+          NDK=$(find "$ANDROID_HOME/ndk" -mindepth 1 -maxdepth 1 -type d | sort -V | tail -1)
+          test -n "$NDK"
+          mkdir -p out
+          "$NDK/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android29-clang" \
+            -std=c11 -O2 -Wall -Wextra -Werror -fPIE -pie -Wl,-z,relro,-z,now \
+            runtime-profiles/dispatcher.c -o out/crosvm-profile-dispatcher
+          sha256sum out/crosvm-profile-dispatcher out/manifest.json > out/SHA256SUMS
+          file out/crosvm-profile-dispatcher
+      - uses: actions/upload-artifact@v4
+        with:
+          name: runtime-profile-compatibility-${{ github.sha }}
+          path: |
+            out/
+            runtime-profiles/
+          if-no-files-found: error
