@@ -13,7 +13,7 @@ public final class DisplayActivity extends Activity {
     private FrameLayout area;
     private TextView status;
     private boolean statusExpanded;
-    private int swallowedHotkey=-1;
+    private final ChordPolicy.Cycle chordCycle=new ChordPolicy.Cycle();
     private NativeSurfaceSource source;
     private final SourceLifetime sourceLifetime=new SourceLifetime();
     private InputForwarder input;
@@ -78,7 +78,7 @@ public final class DisplayActivity extends Activity {
         if(!allowed){if(input!=null)clearInput();if(!manualGate){manualGate=true;service.gate(false);}}
         else{manualGate=false;service.gate(true);if(service.canInput()&&input==null)input=service.newForwarder();}
     }
-    void clearInput(){if(input!=null){input.close();input=null;}buttons=0;mouseKnown=false;touchActive=false;}
+    void clearInput(){chordCycle.reset();if(input!=null){input.close();input=null;}buttons=0;mouseKnown=false;touchActive=false;}
     private void suspend(){clearInput();if(service!=null)service.gate(false);}
     void disconnected(){sourceLifetime.close();clearInput();if(source!=null){source.shutdown();source=null;}displayReady=false;status.setText("已断开；VM继续运行");}
     void updateStatus(){status.setText(service==null?"请先在设置连接路线":service.status()+"\nSurface: "+(displayReady?"已连接":"等待") );}
@@ -95,18 +95,15 @@ public final class DisplayActivity extends Activity {
         return true;
     }
     public boolean dispatchKeyEvent(KeyEvent e){
-        if(e.getKeyCode()==swallowedHotkey){if(e.getAction()==KeyEvent.ACTION_UP)swallowedHotkey=-1;return true;}
-        if(resumed&&hasWindowFocus()&&displayReady&&!ime&&service!=null&&e.getAction()==KeyEvent.ACTION_DOWN){
-            android.content.SharedPreferences prefs=getSharedPreferences("settings",0);
-            int enter=HotkeyPolicy.preset(prefs.getInt("enter_hotkey",1),1),release=HotkeyPolicy.preset(prefs.getInt("release_hotkey",2),2);
+        if(resumed&&hasWindowFocus()&&displayReady&&!ime&&service!=null&&(e.getAction()==KeyEvent.ACTION_DOWN||e.getAction()==KeyEvent.ACTION_UP)){
+            ChordPolicy chord=ChordSettings.load(getSharedPreferences("settings",0));
             int scan=KeyCodeMapper.androidToEvdev(e.getKeyCode());
-            int action=HotkeyPolicy.action(enter,release,scan,e.isCtrlPressed(),e.isAltPressed(),service.canInput());
-            if(action!=HotkeyPolicy.NONE){
-                swallowedHotkey=e.getKeyCode();
-                if(e.getRepeatCount()==0){if(action==HotkeyPolicy.RELEASE)service.releaseByHotkey();else service.resumeByHotkey();}
-                return true;
-            }
-        }
+            boolean down=e.getAction()==KeyEvent.ACTION_DOWN,pending=chordCycle.pending();
+            boolean toggle=chordCycle.event(chord,scan,ChordSettings.mask(e),down,e.getRepeatCount()>0);
+            if(toggle){service.toggleByHotkey();return true;}
+            // Consume the candidate trigger and its release cycle; never forward the trigger to guest.
+            if(pending||chordCycle.pending())return true;
+        }else chordCycle.reset();
         if(e.getKeyCode()==KeyEvent.KEYCODE_BACK){if(e.getAction()==KeyEvent.ACTION_UP)startActivity(new Intent(this,SettingsActivity.class));return true;}
         if(e.getKeyCode()==KeyEvent.KEYCODE_VOLUME_DOWN||e.getKeyCode()==KeyEvent.KEYCODE_VOLUME_UP)return super.dispatchKeyEvent(e);
         if(input!=null&&service!=null&&service.canInput()&&(e.getAction()==KeyEvent.ACTION_DOWN||e.getAction()==KeyEvent.ACTION_UP)){
