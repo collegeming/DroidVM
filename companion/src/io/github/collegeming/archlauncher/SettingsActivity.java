@@ -14,7 +14,7 @@ public class SettingsActivity extends Activity {
         LinearLayout body=new LinearLayout(this);body.setOrientation(LinearLayout.VERTICAL);body.setPadding(32,40,32,24);
         TextView title=new TextView(this);title.setText("Arch Linux · 连接设置");title.setTextSize(25);body.addView(title);
         status=new TextView(this);body.addView(status);
-        TextView note=new TextView(this);note.setText("连接已由 DroidVM 管理并运行的 VM。不会冷启动 daemon、创建独立 VMM 或停止 VM。连接后自动全屏。\n当前仅普通输入；exclusive 默认开启但系统级 grab 尚未完成，实际 held 始终为否。触摸屏不抓取。\n失焦、IME、显示断连都会释放输入；手动释放仅能显式恢复。Ctrl+Alt+F12 释放，支持左右修饰键。");body.addView(note);
+        TextView note=new TextView(this);note.setText("连接 DroidVM 管理的两条固定路线。点击连接后，已运行 VM 仅附加；停止态校验 profile、guard 与受控 launcher SHA256 后启动，再等待原生显示。未知 launcher 会拒绝并提示准备 runtime，不会替换文件或静默回退。不会冷启动 daemon、创建独立 VMM 或停止 VM。连接后自动全屏。\n当前仅普通输入；exclusive 默认开启但系统级 grab 尚未完成，实际 held 始终为否。触摸屏不抓取。\n失焦、IME、显示断连都会释放输入；手动释放仅能显式恢复。Ctrl+Alt+F12 释放，支持左右修饰键。");body.addView(note);
         android.content.SharedPreferences prefs=getSharedPreferences("settings",0);
         Spinner route=new Spinner(this);route.setAdapter(new ArrayAdapter<>(this,android.R.layout.simple_spinner_dropdown_item,SessionPolicy.NAMES));route.setSelection(SessionPolicy.route(prefs.getInt("route",0)));body.addView(route);
         Spinner mode=new Spinner(this);mode.setAdapter(new ArrayAdapter<>(this,android.R.layout.simple_spinner_dropdown_item,new String[]{"Touch","Mouse","Tablet"}));mode.setSelection(Math.max(0,Math.min(2,prefs.getInt("mode",0))));body.addView(mode);

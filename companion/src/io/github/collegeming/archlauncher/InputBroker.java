@@ -18,6 +18,8 @@ public final class InputBroker {
     // Immediate revocation is independent of IO progress; no network call holds a state monitor.
     private final Set<Long> revoked=ConcurrentHashMap.newKeySet();
     private volatile long publishedGeneration;
+    private volatile boolean attachedOnce,closing;
+    private static final String LAUNCHER="/data/data/cn.classfun.droidvm/usr/bin/crosvm";
     private final Set<Integer>[] held=new Set[]{new HashSet<>(),new HashSet<>(),new HashSet<>(),new HashSet<>()};
     private final Set<Integer> modifiers=new HashSet<>(),touchSlots=new HashSet<>();
     private final boolean[] dirty=new boolean[4];
@@ -105,28 +107,46 @@ public final class InputBroker {
         if(revoked.contains(session))return BrokerGate.PAUSED; // release job queued behind this write
         return BrokerGate.DELIVERED;
     }
+    private static String[] strings(org.json.JSONArray array)throws Exception{String[] out=new String[array.length()];for(int i=0;i<out.length;i++)out[i]=array.getString(i);return out;}
+    private boolean configured(String target,MonotonicDeadline budget)throws Exception{
+        JSONObject config=daemon.request("vm_get",new JSONObject().put("vm_id",target),budget).getJSONObject("data");
+        JSONObject screen=config.getJSONObject("screens").getJSONObject("gpu-0");
+        return target.equals(config.getString("id"))&&"CROSVM".equals(config.getString("backend"))&&screen.optBoolean("enabled")&&screen.optBoolean("input_enabled")&&"native".equals(screen.optString("exporter"))
+            &&StartPolicy.configured(target,strings(config.getJSONArray("environment_variables")),strings(config.getJSONArray("extra_options")));
+    }
+    private static String dispatcherHash()throws Exception{
+        // Small script, read-only. No shell command, mutable executable invocation or hash fallback.
+        java.nio.file.Path path=java.nio.file.Path.of(LAUNCHER);
+        if(!java.nio.file.Files.isRegularFile(path)||java.nio.file.Files.size(path)>1024*1024)return "";
+        java.security.MessageDigest digest=java.security.MessageDigest.getInstance("SHA-256");
+        try(InputStream in=java.nio.file.Files.newInputStream(path)){byte[] bytes=new byte[8192];int n;while((n=in.read(bytes))!=-1)digest.update(bytes,0,n);}
+        StringBuilder out=new StringBuilder();for(byte value:digest.digest())out.append(String.format(java.util.Locale.ROOT,"%02x",value&255));return out.toString();
+    }
     private IInputBroker binder(){return new IInputBroker.Stub(){
-        public long attach(String supplied,String target,IBinder lifetime){
+        public long attach(String supplied,String target,IBinder lifetime,boolean allowStart){
             check(supplied);if(!SessionPolicy.allowed(target)||lifetime==null)throw new SecurityException("target denied");
-            MonotonicDeadline budget=new MonotonicDeadline(5000);
-            long result=call(budget,()->{
-                if(budget.millis()==0)return 0L;
+            attachedOnce=true; // startup may exceed the binder-announcement timeout; client pipe owns it
+            MonotonicDeadline budget=new MonotonicDeadline(allowStart?35000:5000);
+            return call(budget,()->{
+                if(budget.millis()==0)return ManagedStart.START_TIMEOUT;
                 MonotonicDeadline cleanup=new MonotonicDeadline(Math.min(RELEASE_MS,budget.millis()));
                 if(gate.generation()!=0)retire(gate.generation(),cleanup);
-                if(releaseFailed){release(cleanup);if(releaseFailed)return 0L;}
-                try{
-                    JSONObject config=daemon.request("vm_get",new JSONObject().put("vm_id",target),budget).getJSONObject("data");
-                    JSONObject screen=config.getJSONObject("screens").getJSONObject("gpu-0");
-                    if(!target.equals(config.getString("id"))||!"CROSVM".equals(config.getString("backend"))||!screen.optBoolean("enabled")||!screen.optBoolean("input_enabled")||!"native".equals(screen.optString("exporter")))return 0L;
-                    if(!"running".equals(daemon.request("vm_status",new JSONObject().put("vm_id",target),budget).getString("state")))return 0L;
-                    if(budget.millis()==0)return 0L;
-                    vm=target;long captured=gate.attach();publishedGeneration=captured;client=lifetime;
-                    death=()->{revoked.add(captured);MonotonicDeadline deathBudget=new MonotonicDeadline(RELEASE_MS);queue(()->retire(captured,deathBudget));};
-                    try{client.linkToDeath(death,0);}catch(RemoteException ignored){retire(captured,new MonotonicDeadline(RELEASE_MS));return 0L;}
-                    return captured;
-                }catch(Exception ignored){return 0L;}
-            },0L);
-            if(result==0)throw new IllegalStateException("E_VM_NOT_READY_OR_RELEASE_UNCONFIRMED");return result;
+                if(releaseFailed){release(cleanup);if(releaseFailed)return ManagedStart.RELEASE_UNCONFIRMED;}
+                long ready=ManagedStart.ensure(new ManagedStart.Host(){
+                    public boolean configured()throws Exception{if(closing)throw new IOException();return InputBroker.this.configured(target,budget);}
+                    public String dispatcherHash()throws Exception{return InputBroker.dispatcherHash();}
+                    public void ping()throws Exception{daemon.request("ping",new JSONObject(),budget);}
+                    public String state()throws Exception{if(closing)throw new IOException();return daemon.request("vm_status",new JSONObject().put("vm_id",target),budget).getString("state");}
+                    public void start()throws Exception{if(closing)throw new IOException();daemon.request("vm_start",new JSONObject().put("vm_id",target),budget);}
+                    public void sleep()throws Exception{Thread.sleep(Math.min(250,budget.millis()));}
+                },allowStart,budget);
+                if(ready<0)return ready;
+                if(budget.millis()==0)return ManagedStart.START_TIMEOUT;
+                vm=target;long captured=gate.attach();publishedGeneration=captured;client=lifetime;
+                death=()->{revoked.add(captured);MonotonicDeadline deathBudget=new MonotonicDeadline(RELEASE_MS);queue(()->retire(captured,deathBudget));};
+                try{client.linkToDeath(death,0);}catch(RemoteException ignored){retire(captured,new MonotonicDeadline(RELEASE_MS));return ManagedStart.NOT_READY;}
+                return captured;
+            },ManagedStart.START_TIMEOUT);
         }
         public IBinder display(String supplied,long session){
             check(supplied);MonotonicDeadline budget=new MonotonicDeadline(500);
@@ -158,9 +178,9 @@ public final class InputBroker {
         Handler handler=new Handler(Looper.getMainLooper());
         handler.postDelayed(new Runnable(){public void run(){if(owner.publishedGeneration!=0)return;context.sendBroadcast(new Intent(ACTION).setPackage(PACKAGE).putExtra("session",session));handler.postDelayed(this,500);}},250);
         new Thread(()->{try{while(control.readLine()!=null){}}catch(Exception ignored){}finally{
-            long g=owner.publishedGeneration;owner.revoked.add(g);MonotonicDeadline budget=new MonotonicDeadline(RELEASE_MS);
+            owner.closing=true;long g=owner.publishedGeneration;owner.revoked.add(g);MonotonicDeadline budget=new MonotonicDeadline(RELEASE_MS);
             owner.call(budget,()->{owner.retire(g,budget);return true;},false);System.exit(0);
         }},"broker-owner").start();
-        handler.postDelayed(()->{if(owner.publishedGeneration==0)System.exit(0);},15000);Looper.loop();
+        handler.postDelayed(()->{if(!owner.attachedOnce)System.exit(0);},15000);Looper.loop();
     }
 }

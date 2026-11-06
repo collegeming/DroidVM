@@ -28,6 +28,7 @@ public final class SessionService extends Service {
     private volatile boolean delivered;
     private int lastResult;
     private boolean inputFault;
+    private boolean startAuthorized;
     private long localDrops;
     private boolean receiverRegistered;
     private DisplayActivity display;
@@ -51,6 +52,7 @@ public final class SessionService extends Service {
         if(RELEASE.equals(action)){manual=true;gate(false);detail="输入已手动释放；请在设置显式恢复";changed();return START_NOT_STICKY;}
         if(CONNECT.equals(action)) {
             int requested=SessionPolicy.route(intent.getIntExtra("route",0));
+            startAuthorized=true;
             if(process==null&&!starting) {route=requested;manual=false;startBroker();}
             else if(requested!=route) {detail="切换路线前请先断开；VM不会被关闭";changed();}
             else {manual=false;inputFault=false;if(broker!=null&&!connected&&!lease.pending())prepare(false);else if(display!=null)display.refreshGate();changed();}
@@ -59,7 +61,7 @@ public final class SessionService extends Service {
     }
     private void startBroker(){
         final long launch=++launchId;starting=true;
-        detail="正在连接 root bridge（仅已运行的管理VM）";changed();
+        detail="正在校验受控runtime与管理VM；停止态将显式启动";changed();
         byte[] bytes=new byte[32];new SecureRandom().nextBytes(bytes);StringBuilder out=new StringBuilder();for(byte b:bytes)out.append(String.format(java.util.Locale.ROOT,"%02x",b&255));token=out.toString();
         String apk=getApplicationInfo().sourceDir;
         if(apk.contains("'")){setError("E_APK_PATH");return;}
@@ -81,19 +83,21 @@ public final class SessionService extends Service {
         final IInputBroker b=broker;final String t=token;
         if(b==null||lease.pending()||stopped)return;
         final InputLease.Attempt attempt=lease.begin(enable);
+        final boolean allowStart=startAuthorized;startAuthorized=false;
         if(display!=null)display.clearInput();
         control.execute(()->{
             try{
-                long next=b.attach(t,SessionPolicy.IDS[route],lifetime);
+                long next=b.attach(t,SessionPolicy.IDS[route],lifetime,allowStart);
                 main.post(()->{
                     if(stopped||broker!=b){lease.fail(attempt);releaseRemote(b,t,next);return;}
+                    if(next<=0){if(lease.fail(attempt))setError(ManagedStart.label(next));return;}
                     if(!lease.complete(attempt,next)){releaseRemote(b,t,next);return;}
                     generation=next;connected=true;
                     if(!lease.current(lease.ticket()))releaseRemote(b,t,next);
                     detail=canInput()?"管理VM已连接":"管理VM已连接，输入暂停";changed();
                     if(display!=null)display.sessionReady();
                 });
-            }catch(Exception ignored){main.post(()->{if(lease.fail(attempt)&&!stopped)setError("E_VM_NOT_READY（请由管理端启动此路线）");});}
+            }catch(Exception ignored){main.post(()->{if(lease.fail(attempt)&&!stopped)setError("BROKER_OR_DAEMON_UNHEALTHY（请断开并检查管理端）");});}
         });
     }
     void attachDisplay(DisplayActivity activity){if(display!=activity){gate(false);display=activity;}if(connected)activity.sessionReady();changed();}
