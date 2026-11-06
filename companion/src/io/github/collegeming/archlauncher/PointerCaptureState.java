@@ -31,4 +31,9 @@ final class PointerCaptureState {
     boolean accepts(Object ticket){return actual&&eligible&&lease==ticket&&ticket!=null;}
     boolean actual(){return actual;}
     boolean eligible(){return eligible;}
+    /** Read-only diagnostics: never expose a lease value or mutate capture state. */
+    String debugState(Object ticket){
+        return "leasePresent="+(lease!=null)+" ticketPresent="+(ticket!=null)+" leaseMatch="+(lease!=null&&lease==ticket)
+            +" eligible="+eligible+" requested="+requested+" actual="+actual+" denied="+denied+" releasing="+releasing;
+    }
 }

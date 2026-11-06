@@ -34,7 +34,18 @@ def check_capture_resume():
     assert activity.count('captureSuppressed=false;') == 1
     assert 'void allowPointerCapture(){captureSuppressed=false;}' in activity
     assert 'captureSuppressed=true;clearInput();' in activity
-    print('Capture resume contracts: CONNECT-before/after-attach, one-shot consumption, ordinary return, route rejection and manual release guards passed')
+    debug = activity[activity.index('    private String captureDebugState()'):activity.index('    private void fit()')]
+    for field in ('captureSuppressed', 'surface.isFocused()', 'surface.hasFocus()', 'surface.isAttachedToWindow()',
+                  'captureEligible()', 'pointerCapture.debugState(ticket)', 'service.canInput()'):
+        assert field in debug
+    assert 'captureDebugState()' in activity[activity.index('    void updateStatus()'):activity.index('    private String captureDebugState()')]
+    machine = (source/'PointerCaptureState.java').read_text(encoding='utf-8')
+    debug_machine = machine[machine.index('    String debugState('):]
+    for field in ('leasePresent=', 'ticketPresent=', 'leaseMatch=', 'eligible=', 'requested=', 'actual=', 'denied=', 'releasing='):
+        assert field in debug_machine
+    assert '.toString(' not in debug_machine and 'hashCode(' not in debug_machine
+    assert 'requestPointerCapture(' not in debug and 'releasePointerCapture(' not in debug
+    print('Capture resume contracts: explicit permission boundaries and read-only boolean capture diagnostics passed')
 
 
 check_capture_resume()

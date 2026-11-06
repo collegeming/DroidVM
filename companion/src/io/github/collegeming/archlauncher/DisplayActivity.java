@@ -123,7 +123,16 @@ public final class DisplayActivity extends Activity {
     }
     private void suspend(){clearInput();if(service!=null)service.gate(false);}
     void disconnected(){sourceLifetime.close();clearInput();if(source!=null){source.shutdown();source=null;}displayReady=false;status.setText("已断开；VM继续运行");}
-    void updateStatus(){status.setText(service==null?"请先在设置连接路线":service.status()+"\nSurface: "+(displayReady?"已连接":"等待")+" · Pointer capture: "+(surface!=null&&surface.hasPointerCapture()?"实际已捕获":"未捕获") );}
+    void updateStatus(){status.setText((service==null?"请先在设置连接路线":service.status()+"\nSurface: "+(displayReady?"已连接":"等待")+" · Pointer capture: "+(surface!=null&&surface.hasPointerCapture()?"实际已捕获":"未捕获"))+captureDebugState());}
+    private String captureDebugState(){
+        android.content.SharedPreferences prefs=getSharedPreferences("settings",0);
+        Object ticket=service==null?null:service.inputLeaseIdentity();
+        return "\nCapture gate: suppressed="+captureSuppressed+" mouseMode="+(prefs.getInt("mode",0)==1)+" enabled="+prefs.getBoolean("pointer_capture",false)
+            +"\nresumed="+resumed+" windowFocus="+hasWindowFocus()+" displayReady="+displayReady+" ime="+ime
+            +"\nsurfacePresent="+(surface!=null)+" focused="+(surface!=null&&surface.isFocused())+" hasFocus="+(surface!=null&&surface.hasFocus())+" attached="+(surface!=null&&surface.isAttachedToWindow())
+            +"\ninputPresent="+(input!=null)+" servicePresent="+(service!=null)+" canInput="+(service!=null&&service.canInput())+" manualGate="+manualGate+" eligible="+captureEligible()
+            +"\nCapture machine: "+pointerCapture.debugState(ticket);
+    }
     private void fit(){int w=area.getWidth(),h=area.getHeight();if(w<=0||h<=0)return;if((long)w*height>(long)h*width)w=h*width/height;else h=w*height/width;surface.setLayoutParams(new FrameLayout.LayoutParams(w,h,Gravity.CENTER));}
     private void pointerButtons(int next){
         int[] masks={MotionEvent.BUTTON_PRIMARY,MotionEvent.BUTTON_SECONDARY,MotionEvent.BUTTON_TERTIARY};short[] codes={EvdevEncoder.BTN_LEFT,EvdevEncoder.BTN_RIGHT,EvdevEncoder.BTN_MIDDLE};
