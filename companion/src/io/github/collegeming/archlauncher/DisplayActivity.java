@@ -13,6 +13,12 @@ public final class DisplayActivity extends Activity {
     private FrameLayout area;
     private TextView status;
     private boolean statusExpanded;
+    // Main-thread-only, in-memory aggregate counters: entry x fixed key label x DOWN/UP.
+    private static final String[] KEY_TEST_LABELS={"Alt","Meta","Tab","T"};
+    private final int[] keyTestCounts=new int[16];
+    private long keyTestUntil;
+    private boolean keyTestSeen;
+    private final Runnable keyTestTimeout=()->stopKeyTest();
     private final ChordPolicy.Cycle chordCycle=new ChordPolicy.Cycle();
     private NativeSurfaceSource source;
     private final SourceLifetime sourceLifetime=new SourceLifetime();
@@ -46,7 +52,9 @@ public final class DisplayActivity extends Activity {
         area.addView(status,statusLayout);
         LinearLayout controls=new LinearLayout(this);
         TextView info=new TextView(this);info.setText("状态");info.setTextColor(0xffffffff);info.setBackgroundColor(0x99202020);info.setPadding(16,12,16,12);
-        info.setOnClickListener(v->{statusExpanded=!statusExpanded;status.setVisibility(statusExpanded?View.VISIBLE:View.GONE);updateStatus();});controls.addView(info);
+        info.setContentDescription("状态；长按开始/结束组合键测试（最多10秒）；仅统计Alt/Meta/Tab/T，不记录其他键");
+        info.setOnClickListener(v->{statusExpanded=!statusExpanded;status.setVisibility(statusExpanded?View.VISIBLE:View.GONE);updateStatus();});
+        info.setOnLongClickListener(v->{toggleKeyTest();return true;});controls.addView(info);
         TextView settings=new TextView(this);settings.setText("设置");settings.setTextColor(0xffffffff);settings.setBackgroundColor(0x99202020);settings.setPadding(16,12,16,12);settings.setOnClickListener(v->startActivity(new Intent(this,SettingsActivity.class)));controls.addView(settings);
         area.addView(controls,new FrameLayout.LayoutParams(-2,-2,Gravity.BOTTOM|Gravity.END));
         area.addOnLayoutChangeListener((v,l,t,r,b,ol,ot,or,ob)->fit());
@@ -63,7 +71,7 @@ public final class DisplayActivity extends Activity {
             MotionEvent copy=MotionEvent.obtain(e.getDownTime(),e.getEventTime(),e.getAction(),props.length,props,coords,e.getMetaState(),e.getButtonState(),e.getXPrecision(),e.getYPrecision(),e.getDeviceId(),e.getEdgeFlags(),e.getSource(),e.getFlags());
             input.sendTouchEvent(copy,EvdevEncoder.NORMALIZED_ABS_MAX/(float)Math.max(1,surface.getWidth()-1),EvdevEncoder.NORMALIZED_ABS_MAX/(float)Math.max(1,surface.getHeight()-1));copy.recycle();if(e.getActionMasked()==MotionEvent.ACTION_UP)touchActive=false;return true;
         });
-        surface.setOnFocusChangeListener((v,focus)->{if(!focus)suspend();refreshGate();});
+        surface.setOnFocusChangeListener((v,focus)->{if(!focus){stopKeyTest();suspend();}refreshGate();});
         surface.setOnGenericMotionListener((v,e)->mouse(e));
         surface.setOnCapturedPointerListener((v,e)->capturedMouse(e));
         setContentView(area);surface.requestFocus();
@@ -138,7 +146,50 @@ public final class DisplayActivity extends Activity {
     }
     private void suspend(){clearInput();if(service!=null)service.gate(false);}
     void disconnected(){sourceLifetime.close();surfaceFocusPending=false;clearInput();if(source!=null){source.shutdown();source=null;}displayReady=false;status.setText("已断开；VM继续运行");}
-    void updateStatus(){status.setText((service==null?"请先在设置连接路线":service.status()+"\nSurface: "+(displayReady?"已连接":"等待")+" · Pointer capture: "+(surface!=null&&surface.hasPointerCapture()?"实际已捕获":"未捕获"))+captureDebugState());}
+    void updateStatus(){status.setText((service==null?"请先在设置连接路线":service.status()+"\nSurface: "+(displayReady?"已连接":"等待")+" · Pointer capture: "+(surface!=null&&surface.hasPointerCapture()?"实际已捕获":"未捕获"))+captureDebugState()+keyTestState());}
+    private void toggleKeyTest(){
+        if(keyTestUntil!=0){stopKeyTest();return;}
+        if(!resumed||!hasWindowFocus())return;
+        java.util.Arrays.fill(keyTestCounts,0);
+        keyTestSeen=true;keyTestUntil=SystemClock.uptimeMillis()+10000;
+        main.postDelayed(keyTestTimeout,10000);
+        statusExpanded=true;status.setVisibility(View.VISIBLE);updateStatus();
+    }
+    private void stopKeyTest(){
+        main.removeCallbacks(keyTestTimeout);
+        if(keyTestUntil==0)return;
+        keyTestUntil=0;updateStatus();
+    }
+    private void observeKeyTest(KeyEvent event,int entry){
+        if(keyTestUntil==0)return;
+        if(!resumed||!hasWindowFocus()||SystemClock.uptimeMillis()>=keyTestUntil){stopKeyTest();return;}
+        int action=event.getAction();
+        if(action!=KeyEvent.ACTION_DOWN&&action!=KeyEvent.ACTION_UP)return;
+        int label;
+        switch(event.getKeyCode()){
+            case KeyEvent.KEYCODE_ALT_LEFT:case KeyEvent.KEYCODE_ALT_RIGHT:label=0;break;
+            case KeyEvent.KEYCODE_META_LEFT:case KeyEvent.KEYCODE_META_RIGHT:label=1;break;
+            case KeyEvent.KEYCODE_TAB:label=2;break;
+            case KeyEvent.KEYCODE_T:label=3;break;
+            default:return;
+        }
+        int slot=entry*8+label*2+(action==KeyEvent.ACTION_UP?1:0);
+        if(keyTestCounts[slot]<Integer.MAX_VALUE)keyTestCounts[slot]++;
+        updateStatus();
+    }
+    private String keyTestState(){
+        String text="\n组合键测试：长按状态开始/结束（最多10秒）\n仅统计Alt/Meta/Tab/T，不记录其他键";
+        if(!keyTestSeen)return text;
+        StringBuilder result=new StringBuilder(text).append(keyTestUntil==0?" · 已停止":" · 进行中");
+        for(int entry=0;entry<2;entry++){
+            result.append(entry==0?"\ndispatchKeyEvent DOWN/UP: ":"\ndispatchKeyShortcutEvent DOWN/UP: ");
+            for(int label=0;label<KEY_TEST_LABELS.length;label++){
+                int slot=entry*8+label*2;
+                result.append(KEY_TEST_LABELS[label]).append(' ').append(keyTestCounts[slot]).append('/').append(keyTestCounts[slot+1]).append(' ');
+            }
+        }
+        return result.toString();
+    }
     private String captureDebugState(){
         android.content.SharedPreferences prefs=getSharedPreferences("settings",0);
         Object ticket=service==null?null:service.inputLeaseIdentity();
@@ -189,7 +240,12 @@ public final class DisplayActivity extends Activity {
         pointerButtons(e.getButtonState());if(e.getActionMasked()==MotionEvent.ACTION_SCROLL)wheel(e);
         return true;
     }
+    @Override public boolean dispatchKeyShortcutEvent(KeyEvent e){
+        observeKeyTest(e,1);
+        return super.dispatchKeyShortcutEvent(e);
+    }
     public boolean dispatchKeyEvent(KeyEvent e){
+        observeKeyTest(e,0);
         if(resumed&&hasWindowFocus()&&displayReady&&!ime&&service!=null&&(e.getAction()==KeyEvent.ACTION_DOWN||e.getAction()==KeyEvent.ACTION_UP)){
             ChordPolicy chord=ChordSettings.load(getSharedPreferences("settings",0));
             int scan=KeyCodeMapper.androidToEvdev(e.getKeyCode());
@@ -216,7 +272,7 @@ public final class DisplayActivity extends Activity {
         if(ctl!=null){ctl.setSystemBarsBehavior(WindowInsetsController.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE);if(getSharedPreferences("settings",0).getBoolean("immersive",true))ctl.hide(WindowInsets.Type.systemBars());else ctl.show(WindowInsets.Type.systemBars());}
     }
     protected void onResume(){super.onResume();resumed=true;manualGate=false;main.post(findSession);getWindow().getDecorView().post(this::applyFullscreen);refreshGate();}
-    protected void onPause(){resumed=false;main.removeCallbacks(findSession);suspend();super.onPause();}
-    public void onWindowFocusChanged(boolean focus){super.onWindowFocusChanged(focus);if(focus)applyFullscreen();refreshGate();}
-    protected void onDestroy(){if(service!=null)service.removeDisplay(this);disconnected();super.onDestroy();}
+    protected void onPause(){resumed=false;stopKeyTest();main.removeCallbacks(findSession);suspend();super.onPause();}
+    public void onWindowFocusChanged(boolean focus){super.onWindowFocusChanged(focus);if(!focus)stopKeyTest();if(focus)applyFullscreen();refreshGate();}
+    protected void onDestroy(){stopKeyTest();if(service!=null)service.removeDisplay(this);disconnected();super.onDestroy();}
 }
