@@ -12,7 +12,8 @@ import java.util.concurrent.*;
 /** Root only. Serialized by the broker IO worker, never by a broker state lock. */
 final class DaemonClient {
     private volatile Socket socket;
-    private static final ScheduledExecutorService watchdog=Executors.newSingleThreadScheduledExecutor();
+    private static final ScheduledThreadPoolExecutor watchdog=new ScheduledThreadPoolExecutor(1);
+    static { watchdog.setRemoveOnCancelPolicy(true); }
     private static final String BASE="/data/data/cn.classfun.droidvm/run/";
     JSONObject request(String command,JSONObject params)throws Exception{return request(command,params,new MonotonicDeadline(2500));}
     JSONObject request(String command,JSONObject params,MonotonicDeadline budget)throws Exception{

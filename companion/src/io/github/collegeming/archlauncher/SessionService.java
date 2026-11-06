@@ -75,7 +75,7 @@ public final class SessionService extends Service {
         main.postDelayed(()->{if(!stopped&&launch==launchId&&broker==null)setError("E_ROOT_TIMEOUT");},12000);
     }
     private void releaseRemote(IInputBroker b,String t,long g){
-        if(b!=null&&g>0)control.execute(()->{try{b.releaseAll(t,g);}catch(Exception ignored){}});
+        if(b!=null&&g>0)try{control.execute(()->{try{b.releaseAll(t,g);}catch(Exception ignored){}});}catch(RejectedExecutionException ignored){}
     }
     private void prepare(boolean enable){
         final IInputBroker b=broker;final String t=token;
@@ -148,7 +148,7 @@ public final class SessionService extends Service {
         forwarder.setInputMode(InputMode.values()[mode]);
         return forwarder;
     }
-    String status(){return SessionPolicy.NAMES[route]+"\n"+detail+"\n输入: "+(canInput()?"普通转发就绪":"已暂停")+" · 最近投递: "+(delivered?"成功":"未确认")+"\nexclusive配置: "+(getSharedPreferences("settings",0).getBoolean("exclusive",true)?"开启":"关闭")+" · 实际held: 否（grab未完成）";}
+    String status(){return SessionPolicy.NAMES[route]+"\n"+detail+"\n输入: "+(canInput()?"普通转发就绪":"已暂停")+" · 最近投递: "+(delivered?"成功":"未确认")+" · lease关闭丢弃: "+localDrops+"\nexclusive配置: "+(getSharedPreferences("settings",0).getBoolean("exclusive",true)?"开启":"关闭")+" · 实际held: 否（grab未完成）";}
     private void setError(String code){if(stopped)return;connected=false;gate(false);detail=code;changed();}
     private void changed(){if(stopped)return;notifyState();if(display!=null)display.updateStatus();}
     private PendingIntent activity(Class<?> cls,int id){return PendingIntent.getActivity(this,id,new Intent(this,cls).addFlags(Intent.FLAG_ACTIVITY_REORDER_TO_FRONT),PendingIntent.FLAG_IMMUTABLE|PendingIntent.FLAG_UPDATE_CURRENT);}
