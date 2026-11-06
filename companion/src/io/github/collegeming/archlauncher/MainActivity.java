@@ -30,16 +30,16 @@ public final class MainActivity extends Activity {
         int pad = (int) (24 * getResources().getDisplayMetrics().density);
         layout.setPadding(pad, pad, pad, pad);
         TextView title = new TextView(this);
-        title.setText("Arch Linux · 2272 × 1514");
+        title.setText("Arch Linux \u00b7 2272 \u00d7 1514");
         title.setTextSize(24);
         layout.addView(title);
         TextView note = new TextView(this);
-        note.setText("连接现有 DroidVM 原生显示。当前版本打开后请点击原生全屏按钮。\n需要授予本应用 root；仅校验 runtime 并连接健康 daemon，不恢复文件、不冷启动 daemon。runtime 更新后需安装更新了校验清单的启动器。");
+        note.setText("\u8fde\u63a5\u73b0\u6709 DroidVM \u539f\u751f\u663e\u793a\u3002\u5f53\u524d\u7248\u672c\u6253\u5f00\u540e\u8bf7\u70b9\u51fb\u539f\u751f\u5168\u5c4f\u6309\u94ae\u3002\n\u9700\u8981\u6388\u4e88\u672c\u5e94\u7528 root\uff1b\u4ec5\u6821\u9a8c runtime \u5e76\u8fde\u63a5\u5065\u5eb7 daemon\uff0c\u4e0d\u6062\u590d\u6587\u4ef6\u3001\u4e0d\u51b7\u542f\u52a8 daemon\u3002runtime \u66f4\u65b0\u540e\u9700\u5b89\u88c5\u66f4\u65b0\u4e86\u6821\u9a8c\u6e05\u5355\u7684\u542f\u52a8\u5668\u3002");
         layout.addView(note);
         status = new TextView(this);
         layout.addView(status);
         open = new Button(this);
-        open.setText("打开 Arch Linux");
+        open.setText("\u6253\u5f00 Arch Linux");
         open.setOnClickListener(v -> launch());
         layout.addView(open);
         setContentView(layout);
@@ -48,35 +48,35 @@ public final class MainActivity extends Activity {
 
     private void launch() {
         open.setEnabled(false);
-        status.setText("正在检查 root、runtime 和 daemon…");
+        status.setText("\u6b63\u5728\u68c0\u67e5 root\u3001runtime \u548c daemon\u2026");
         new Thread(() -> {
             try {
                 if (!root("id -u").trim().equals("0"))
-                    throw new Exception("未获得 root 授权。");
+                    throw new Exception("\u672a\u83b7\u5f97 root \u6388\u6743\u3002");
                 JSONObject manifest;
                 try (InputStream in = getAssets().open("runtime-manifest.json")) {
                     manifest = new JSONObject(new String(in.readAllBytes(), StandardCharsets.UTF_8));
                 }
                 if (!VM.equals(manifest.getString("vm_id")))
-                    throw new Exception("启动器 VM 清单不一致。");
+                    throw new Exception("\u542f\u52a8\u5668 VM \u6e05\u5355\u4e0d\u4e00\u81f4\u3002");
                 JSONObject files = manifest.getJSONObject("files");
                 StringBuilder check = new StringBuilder("set -e\n");
                 for (var it = files.keys(); it.hasNext();) {
                     String path = it.next();
                     String hash = files.getString(path);
                     if (!path.matches("/[a-zA-Z0-9_./-]+") || !hash.matches("[a-f0-9]{64}"))
-                        throw new Exception("runtime 校验清单无效。");
+                        throw new Exception("runtime \u6821\u9a8c\u6e05\u5355\u65e0\u6548\u3002");
                     check.append("test \"$(sha256sum '").append(path)
                         .append("' | cut -d ' ' -f 1)\" = '").append(hash).append("'\n");
                 }
                 check.append("printf verified");
                 if (!root(check.toString()).equals("verified"))
-                    throw new Exception("runtime 校验未通过，请先完成受控部署。");
+                    throw new Exception("runtime \u6821\u9a8c\u672a\u901a\u8fc7\uff0c\u8bf7\u5148\u5b8c\u6210\u53d7\u63a7\u90e8\u7f72\u3002");
                 // Read credentials only into memory; never include them in a command, log or UI.
                 String config = root("cat " + BASE + "run/droidvmd-port.txt; printf '\\n'; cat "
                     + BASE + "run/droidvmd-token.txt").trim();
                 String[] values = config.split("\\s+", 2);
-                if (values.length != 2) throw new Exception("daemon 未准备好，请先完成受控启动。");
+                if (values.length != 2) throw new Exception("daemon \u672a\u51c6\u5907\u597d\uff0c\u8bf7\u5148\u5b8c\u6210\u53d7\u63a7\u542f\u52a8\u3002");
                 int port = Integer.parseInt(values[0]);
                 try (Socket socket = new Socket()) {
                     socket.connect(new InetSocketAddress("127.0.0.1", port), 4000);
@@ -120,14 +120,14 @@ public final class MainActivity extends Activity {
                     || !amResult.matches("(?s).*status:\\s*ok\\b.*"))
                     throw new Exception("Activity launch failed");
                 runOnUiThread(() -> {
-                    status.setText("已打开原生显示，请点击其全屏按钮。Ctrl+Alt+F12 退出独占需要 daemon 已配置逃生键。");
+                    status.setText("\u5df2\u6253\u5f00\u539f\u751f\u663e\u793a\uff0c\u8bf7\u70b9\u51fb\u5176\u5168\u5c4f\u6309\u94ae\u3002Ctrl+Alt+F12 \u9000\u51fa\u72ec\u5360\u9700\u8981 daemon \u5df2\u914d\u7f6e\u9003\u751f\u952e\u3002");
                     open.setEnabled(true);
                 });
             } catch (Exception error) {
                 // Do not surface command stdout/stderr, server messages or exception text: they
                 // can include credentials or app-private state. Fail closed with fixed guidance.
                 runOnUiThread(() -> {
-                    status.setText("未启动：请检查 root 授权、匹配的 runtime 和已运行的健康 daemon。启动器不会恢复文件或冷启动 stock runtime。");
+                    status.setText("\u672a\u542f\u52a8\uff1a\u8bf7\u68c0\u67e5 root \u6388\u6743\u3001\u5339\u914d\u7684 runtime \u548c\u5df2\u8fd0\u884c\u7684\u5065\u5eb7 daemon\u3002\u542f\u52a8\u5668\u4e0d\u4f1a\u6062\u590d\u6587\u4ef6\u6216\u51b7\u542f\u52a8 stock runtime\u3002");
                     open.setEnabled(true);
                 });
             }
