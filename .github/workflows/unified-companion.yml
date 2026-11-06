@@ -26,8 +26,9 @@ jobs:
       - name: Test session policy and assemble fixed DroidVM sources
         run: |
           mkdir -p out/tests
-          javac --release 11 -d out/tests companion/src/io/github/collegeming/archlauncher/SessionPolicy.java companion/test/io/github/collegeming/archlauncher/SessionPolicyTest.java
+          javac --release 11 -d out/tests companion/src/io/github/collegeming/archlauncher/SessionPolicy.java companion/src/io/github/collegeming/archlauncher/BrokerGate.java companion/test/io/github/collegeming/archlauncher/*.java
           java -cp out/tests io.github.collegeming.archlauncher.SessionPolicyTest
+          java -cp out/tests io.github.collegeming.archlauncher.BrokerGateTest
           python3 -I companion/prepare.py fixed-source companion
           python3 -I companion/test_source_contracts.py companion
       - name: Compile companion only
