@@ -7,7 +7,7 @@
   "profiles": [
     {
       "id": "gfxstream-v1", "uuid": "d570d1fd-afcf-407d-a82c-fccadc203cf1", "display_name": "Arch Linux \u00b7 gfxstream",
-      "disk": {"path": "/storage/emulated/0/DroidVM/VMs/Arch-gfxstream/arch.img", "dev": 212, "ino": 522665, "format": "raw", "backing": null},
+      "disk": {"path": "/storage/emulated/0/DroidVM/VMs/Arch-gfxstream/arch.img", "backend_path": "/data/media/0/DroidVM/VMs/Arch-gfxstream/arch.img", "dev": 212, "ino": 522665, "format": "raw", "backing": null},
       "kernel": {"path": "/storage/emulated/0/DroidVM/VMs/Arch-gfxstream/boot/Image", "sha256": "702e455882208eae8818bc058a37ed04e12fb9db14d86310be3124c857e919ae"},
       "initrd": {"path": "/storage/emulated/0/DroidVM/VMs/Arch-gfxstream/boot/initramfs.img", "sha256": "cab36f21d8b2b166e10c5892b1c00d1a010ef2e3c7346c39c6d9d3aed26d7497"},
       "runtime": {"path": "/data/data/cn.classfun.droidvm/usr/bin/crosvm.orig", "sha256": "6a952ad1256da68246a0b8230c457ac5266aba62d9362b58fbfc5003b7faa514"},
@@ -18,7 +18,7 @@
     },
     {
       "id": "panvk-v1", "uuid": "ecb0505e-718b-49a2-b284-de72d735fde1", "display_name": "Arch Linux \u00b7 PanVK",
-      "disk": {"path": "/storage/emulated/0/DroidVM/VMs/Arch-PanVK/root.qcow2", "dev": 212, "ino": 527919, "format": "qcow2", "backing": null},
+      "disk": {"path": "/storage/emulated/0/DroidVM/VMs/Arch-PanVK/root.qcow2", "backend_path": "/data/media/0/DroidVM/VMs/Arch-PanVK/root.qcow2", "dev": 212, "ino": 527919, "format": "qcow2", "backing": null},
       "kernel": {"path": "/storage/emulated/0/DroidVM/VMs/Arch-PanVK/boot/Image", "sha256": "80af1fe7be83a08d5392b83383342cf32b1f278f6d8675d75dc4617b047a09b9"},
       "initrd": {"path": "/storage/emulated/0/DroidVM/VMs/Arch-PanVK/boot/initramfs.img", "sha256": "7d7aafd8a62066c090b4fcd84191c11f8eea72f4efdb8713328bfd4123b144d5"},
       "runtime": {"path": "/data/local/tmp/panvk-stability-v1/bin/crosvm-native-alpha", "sha256": "c7abb915fb1404feefd208ceb18e5b0069c18a71867dbe4a1fb5eda5e82c13e7"},
