@@ -22,6 +22,13 @@ public final class MainActivity extends Activity {
     private static final String BASE = "/data/data/cn.classfun.droidvm/";
     private TextView status;
     private Button open;
+    private boolean launching;
+
+    @Override protected void onNewIntent(android.content.Intent intent) {
+        super.onNewIntent(intent);
+        setIntent(intent);
+        launch();
+    }
 
     @Override public void onCreate(Bundle state) {
         super.onCreate(state);
@@ -47,6 +54,8 @@ public final class MainActivity extends Activity {
     }
 
     private void launch() {
+        if (launching) return;
+        launching = true;
         open.setEnabled(false);
         status.setText("\u6b63\u5728\u68c0\u67e5 root\u3001runtime \u548c daemon\u2026");
         new Thread(() -> {
@@ -164,7 +173,8 @@ public final class MainActivity extends Activity {
                     throw new Exception("Activity launch failed");
                 runOnUiThread(() -> {
                     status.setText("\u5df2\u6253\u5f00\u539f\u751f\u663e\u793a\uff0c\u8bf7\u70b9\u51fb\u5176\u5168\u5c4f\u6309\u94ae\u3002Ctrl+Alt+F12 \u9000\u51fa\u72ec\u5360\u9700\u8981 daemon \u5df2\u914d\u7f6e\u9003\u751f\u952e\u3002");
-                    open.setEnabled(true);
+                    launching = false;
+                    finish();
                 });
             } catch (Exception error) {
                 // Do not surface command stdout/stderr, server messages or exception text: they
@@ -173,6 +183,7 @@ public final class MainActivity extends Activity {
                 runOnUiThread(() -> {
                     status.setText(String.format(java.util.Locale.ROOT,
                         "\u672a\u5b8c\u6210 [E_%s]\u3002\u8bf7\u5c06\u6b64\u9636\u6bb5\u7801\u63d0\u4f9b\u7ed9\u6392\u67e5\u4eba\u5458\u3002\u4e0d\u4f1a\u6062\u590d runtime \u6216\u51b7\u542f\u52a8 daemon\u3002", failedStage));
+                    launching = false;
                     open.setEnabled(true);
                 });
             }
