@@ -12,12 +12,15 @@ import java.util.concurrent.*;
 /** Root only. Serialized by the broker IO worker, never by a broker state lock. */
 final class DaemonClient {
     private volatile Socket socket;
+    private boolean failed;
     private static final ScheduledThreadPoolExecutor watchdog=new ScheduledThreadPoolExecutor(1);
     static { watchdog.setRemoveOnCancelPolicy(true); }
     private static final String BASE="/data/data/cn.classfun.droidvm/run/";
     JSONObject request(String command,JSONObject params)throws Exception{return request(command,params,new MonotonicDeadline(2500));}
     JSONObject request(String command,JSONObject params,MonotonicDeadline budget)throws Exception{
+        if(failed)throw new IOException("E_SESSION_UNHEALTHY");
         requireTime(budget);
+        budget=new MonotonicDeadline(Math.min(2500,budget.millis()));
         if(socket==null){
             Socket opening=new Socket();socket=opening;
             try{
@@ -25,10 +28,10 @@ final class DaemonClient {
                 opening.connect(new InetSocketAddress("127.0.0.1",port),Math.min(2000,requireTime(budget)));
                 String token=Files.readString(Path.of(BASE+"droidvmd-token.txt")).trim();
                 exchange(opening,"auth",new JSONObject().put("token",token),budget);
-            }catch(Exception ignored){close();throw new IOException("E_AUTH");}
+            }catch(Exception ignored){failed=true;close();throw new IOException("E_AUTH");}
         }
         try{return exchange(socket,command,params,budget);}
-        catch(Exception ignored){close();throw new IOException("E_DAEMON");}
+        catch(Exception ignored){failed=true;close();throw new IOException("E_DAEMON");}
     }
     private static int requireTime(MonotonicDeadline budget)throws IOException{int millis=budget.millis();if(millis==0)throw new IOException("E_DEADLINE");return millis;}
     private JSONObject exchange(Socket active,String command,JSONObject params,MonotonicDeadline budget)throws Exception{
