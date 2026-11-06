@@ -121,7 +121,7 @@ public final class InputBroker {
                     if(!"running".equals(daemon.request("vm_status",new JSONObject().put("vm_id",target),budget).getString("state")))return 0L;
                     if(budget.millis()==0)return 0L;
                     vm=target;long captured=gate.attach();publishedGeneration=captured;client=lifetime;
-                    death=()->{revoked.add(captured);MonotonicDeadline cleanup=new MonotonicDeadline(RELEASE_MS);queue(()->retire(captured,cleanup));};
+                    death=()->{revoked.add(captured);MonotonicDeadline deathBudget=new MonotonicDeadline(RELEASE_MS);queue(()->retire(captured,deathBudget));};
                     try{client.linkToDeath(death,0);}catch(RemoteException ignored){retire(captured,new MonotonicDeadline(RELEASE_MS));return 0L;}
                     return captured;
                 }catch(Exception ignored){return 0L;}
