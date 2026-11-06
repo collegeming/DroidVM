@@ -8,7 +8,7 @@ final class ChordPolicy {
     ChordPolicy(int modifiers,int trigger){if(!valid(modifiers,trigger))throw new IllegalArgumentException("invalid chord");this.modifiers=modifiers;this.trigger=trigger;}
     static int modifier(int scan){switch(scan){case 29:case 97:return CTRL;case 56:case 100:return ALT;case 42:case 54:return SHIFT;case 125:case 126:return META;default:return 0;}}
     static boolean valid(int modifiers,int trigger){
-        if(modifiers<=0||(modifiers&~15)!=0||modifier(trigger)!=0)return false;
+        if(modifiers<0||(modifiers&~15)!=0||modifier(trigger)!=0)return false;
         // Stable common typing keys, function keys and navigation keys; never host power/volume/Home/Back.
         return trigger>=2&&trigger<=13||trigger>=16&&trigger<=28||trigger>=30&&trigger<=41||trigger>=43&&trigger<=53
             ||trigger>=57&&trigger<=68||trigger==87||trigger==88||trigger>=102&&trigger<=111;
@@ -40,7 +40,7 @@ final class ChordPolicy {
                 if(repeat){rejected=true;error="请松开后重新录入，不接受长按重复";}
                 down.add(scan);int mod=modifier(scan);modifiers|=mod;
                 if(mod==0){
-                    if(candidate!=null||!valid(modifiers,scan)){rejected=true;error="需要至少一个修饰键和一个可用触发键；不接受系统键";}
+                    if(candidate!=null||!valid(modifiers,scan)){rejected=true;error="请选择一个可用单键或修饰键组合；不接受系统键";}
                     else candidate=new ChordPolicy(modifiers,scan);
                 }
                 return null;

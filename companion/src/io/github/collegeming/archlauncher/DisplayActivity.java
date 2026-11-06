@@ -102,7 +102,7 @@ public final class DisplayActivity extends Activity {
             boolean toggle=chordCycle.event(chord,scan,ChordSettings.mask(e),down,e.getRepeatCount()>0);
             if(toggle){service.toggleByHotkey();return true;}
             // Consume the candidate trigger and its release cycle; never forward the trigger to guest.
-            if(pending||chordCycle.pending())return true;
+            if(pending||chordCycle.pending()||chord.matches(scan,ChordSettings.mask(e)))return true;
         }else chordCycle.reset();
         if(e.getKeyCode()==KeyEvent.KEYCODE_BACK){if(e.getAction()==KeyEvent.ACTION_UP)startActivity(new Intent(this,SettingsActivity.class));return true;}
         if(e.getKeyCode()==KeyEvent.KEYCODE_VOLUME_DOWN||e.getKeyCode()==KeyEvent.KEYCODE_VOLUME_UP)return super.dispatchKeyEvent(e);
