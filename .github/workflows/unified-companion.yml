@@ -37,6 +37,21 @@ jobs:
           java -cp out/tests io.github.collegeming.archlauncher.PointerCaptureTest
           python3 -I companion/prepare.py fixed-source companion
           python3 -I companion/test_source_contracts.py companion
+      - name: Test daemon IPC offline
+        timeout-minutes: 3
+        shell: bash
+        run: |
+          set -euo pipefail
+          DEPS="$(mktemp -d "$RUNNER_TEMP/companion-ipc-json.XXXXXX")"
+          trap 'rm -rf "$DEPS"' EXIT
+          curl --fail --silent --show-error --location --max-time 60 \
+            https://repo.maven.apache.org/maven2/org/json/json/20240303/json-20240303.jar \
+            -o "$DEPS/json.jar"
+          printf '%s  %s\n' 3cf6cd6892e32e2b4c1c39e0f52f5248a2f5b37646fdfbb79a66b46b618414ed "$DEPS/json.jar" | sha256sum -c -
+          javac --release 11 -cp "out/tests:$DEPS/json.jar" -d out/tests \
+            companion/src/io/github/collegeming/archlauncher/DaemonClient.java \
+            companion/test-ipc/io/github/collegeming/archlauncher/DaemonClientTest.java
+          timeout 60s java -cp "out/tests:$DEPS/json.jar" io.github.collegeming.archlauncher.DaemonClientTest
       - name: Compile companion only
         shell: bash
         run: |
