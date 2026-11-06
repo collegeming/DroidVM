@@ -6,7 +6,7 @@
   "stock": {"path": "/data/data/cn.classfun.droidvm/usr/bin/crosvm.orig.bak-stock-579d1a5b", "sha256": "cd3693ba876720f7ab7c08e5d6358101336f3bbcdb3d7d4f324ac29274bf6a7b"},
   "profiles": [
     {
-      "id": "gfxstream-v1", "uuid": "d570d1fd-afcf-407d-a82c-fccadc203cf1", "display_name": "Arch Linux · gfxstream",
+      "id": "gfxstream-v1", "uuid": "d570d1fd-afcf-407d-a82c-fccadc203cf1", "display_name": "Arch Linux \u00b7 gfxstream",
       "disk": {"path": "/storage/emulated/0/DroidVM/VMs/Arch-gfxstream/arch.img", "dev": 212, "ino": 522665, "format": "raw", "backing": null},
       "kernel": {"path": "/storage/emulated/0/DroidVM/VMs/Arch-gfxstream/boot/Image", "sha256": "702e455882208eae8818bc058a37ed04e12fb9db14d86310be3124c857e919ae"},
       "initrd": {"path": "/storage/emulated/0/DroidVM/VMs/Arch-gfxstream/boot/initramfs.img", "sha256": "cab36f21d8b2b166e10c5892b1c00d1a010ef2e3c7346c39c6d9d3aed26d7497"},
@@ -17,7 +17,7 @@
       "blocked_by": ["stock guard rejection evidence", "complete dynamic dependency inventory"]
     },
     {
-      "id": "panvk-v1", "uuid": "ecb0505e-718b-49a2-b284-de72d735fde1", "display_name": "Arch Linux · PanVK",
+      "id": "panvk-v1", "uuid": "ecb0505e-718b-49a2-b284-de72d735fde1", "display_name": "Arch Linux \u00b7 PanVK",
       "disk": {"path": "/storage/emulated/0/DroidVM/VMs/Arch-PanVK/root.qcow2", "dev": 212, "ino": 527919, "format": "qcow2", "backing": null},
       "kernel": {"path": "/storage/emulated/0/DroidVM/VMs/Arch-PanVK/boot/Image", "sha256": "80af1fe7be83a08d5392b83383342cf32b1f278f6d8675d75dc4617b047a09b9"},
       "initrd": {"path": "/storage/emulated/0/DroidVM/VMs/Arch-PanVK/boot/initramfs.img", "sha256": "7d7aafd8a62066c090b4fcd84191c11f8eea72f4efdb8713328bfd4123b144d5"},
