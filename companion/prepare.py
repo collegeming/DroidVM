@@ -20,6 +20,11 @@ for name in files:
     text = text.replace('Log.d(TAG, fmt("key scan=%d down=%b delivered=%b", scanCode, pressed, ok));','')
     if name.endswith('DisplayProvider.java'):
         text = text.replace('private void onBinderReady(IBinder binder) {','private void onBinderReady(IBinder binder) {\n        if (executor.isShutdown()) return;')
+        # CONNECTED must mean the actual main Surface was delivered, not just binder discovery.
+        text = text.replace('        onConnected.accept(true);\n        applyPendingSurface();','        applyPendingSurface();')
+        text = text.replace('    private void markSent() {\n        needsSend = false;','    private void markSent() {\n        needsSend = false;\n        onConnected.accept(true);')
+        text = text.replace('            needsSend = false;\n            var svc = displayService;','            needsSend = false;\n            onConnected.accept(false);\n            var svc = displayService;')
+        text = text.replace('    void shutdown() {\n        if (displayService != null) {','    void shutdown() {\n        if (displayService != null) {\n            try { displayService.removeSurface(false); } catch (Exception ignored) {}\n            try { displayService.removeSurface(true); } catch (Exception ignored) {}')
     (out / Path(name).name).write_text(text + '\n', encoding='utf-8')
 for name in ['DisplayConfig.aidl','ICrosvmAndroidDisplayService.aidl']:
     dest = target / 'src/android/crosvm' / name
