@@ -15,9 +15,10 @@ public final class InputBroker {
     private final DaemonClient daemon = new DaemonClient();
     private final Set<Integer>[] held = new Set[]{new HashSet<>(),new HashSet<>(),new HashSet<>(),new HashSet<>()};
     private final Set<Integer> modifiers = new HashSet<>();
+    private final boolean[] dirty=new boolean[4];
     private long sequence, generation;
     private String vm;
-    private boolean released;
+    private boolean released, releaseFailed;
     private IBinder client;
     private IBinder.DeathRecipient death;
     private final int uid;
@@ -41,7 +42,9 @@ public final class InputBroker {
     }
     private void release() {
         if(vm==null)return;
+        releaseFailed=false;
         for(int ch=0;ch<4;ch++) {
+            if(!dirty[ch])continue;
             ByteArrayOutputStream out=new ByteArrayOutputStream();
             for(int key:held[ch])record(out,1,key,0);
             if(ch==0) {
@@ -50,7 +53,7 @@ public final class InputBroker {
             }
             if(ch==2 || ch==3)for(int button=0x110;button<=0x114;button++)record(out,1,button,0);
             record(out,0,0,0);
-            if(send(ch,out.toByteArray()))held[ch].clear();
+            if(send(ch,out.toByteArray())){held[ch].clear();dirty[ch]=false;}else releaseFailed=true;
         }
         modifiers.clear();
     }
@@ -69,6 +72,7 @@ public final class InputBroker {
                 synchronized(InputBroker.this) {
                     if(!SessionPolicy.allowed(target)||lifetime==null)throw new SecurityException("target denied");
                     if(generation!=0)retire(generation);
+                    if(releaseFailed)throw new IllegalStateException("E_RELEASE_UNCONFIRMED");
                     try {
                         JSONObject config=daemon.request("vm_get",new JSONObject().put("vm_id",target)).getJSONObject("data");
                         JSONObject screen=config.getJSONObject("screens").getJSONObject("gpu-0");
@@ -78,7 +82,7 @@ public final class InputBroker {
                     vm=target; generation=++sequence; released=false;
                     final long captured=generation;
                     client=lifetime;
-                    death=()->{synchronized(InputBroker.this){retire(captured);} main.postDelayed(()->System.exit(0),50);};
+                    death=()->{synchronized(InputBroker.this){if(!valid(captured))return;retire(captured);}};
                     try { client.linkToDeath(death,0); }
                     catch(RemoteException e){retire(captured);throw e;}
                     return captured;
@@ -113,6 +117,7 @@ public final class InputBroker {
                         int type=data.getShort()&65535,code=data.getShort()&65535,value=data.getInt();
                         if(type==1 && value!=0)held[channel].add(code);
                     }
+                    dirty[channel]=true;
                     if(!send(channel,bytes)){released=true;release();return false;}
                     data.rewind();
                     while(data.remaining()>=8) {

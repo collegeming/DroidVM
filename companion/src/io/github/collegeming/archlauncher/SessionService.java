@@ -16,13 +16,14 @@ public final class SessionService extends Service {
     private final ExecutorService control=Executors.newSingleThreadExecutor();
     private IInputBroker broker;
     private final IBinder lifetime=new Binder();
-    private Process process;
+    private java.lang.Process process;
     private OutputStream ownerPipe;
     private String token;
     private int route;
     private long generation;
     private long localEpoch;
-    private boolean manual, connected, armed, preparing;
+    private boolean manual, connected, armed, preparing, starting, stopped;
+    private long launchId;
     private volatile boolean inputOpen;
     private volatile long inputEpoch;
     private volatile String detail="未连接";
@@ -49,27 +50,28 @@ public final class SessionService extends Service {
         if(RELEASE.equals(action)){manual=true;gate(false);detail="输入已手动释放；请在设置显式恢复";changed();return START_NOT_STICKY;}
         if(CONNECT.equals(action)) {
             int requested=SessionPolicy.route(intent.getIntExtra("route",0));
-            if(process==null) {route=requested;manual=false;startBroker();}
+            if(process==null&&!starting) {route=requested;manual=false;startBroker();}
             else if(requested!=route) {detail="切换路线前请先断开；VM不会被关闭";changed();}
             else {manual=false;if(display!=null)display.refreshGate();changed();}
         }
         return START_NOT_STICKY;
     }
     private void startBroker(){
+        final long launch=++launchId;starting=true;
         detail="正在连接 root bridge（仅已运行的管理VM）";changed();
         byte[] bytes=new byte[32];new SecureRandom().nextBytes(bytes);StringBuilder out=new StringBuilder();for(byte b:bytes)out.append(String.format(java.util.Locale.ROOT,"%02x",b&255));token=out.toString();
         String apk=getApplicationInfo().sourceDir;
         if(apk.contains("'")){setError("E_APK_PATH");return;}
         control.execute(()->{
             try{
-                Process next=new ProcessBuilder("su","-M","-c","CLASSPATH='"+apk+"' /system/bin/app_process /system/bin "+InputBroker.class.getName()+" "+android.os.Process.myUid())
+                java.lang.Process next=new ProcessBuilder("su","-M","-c","CLASSPATH='"+apk+"' /system/bin/app_process /system/bin "+InputBroker.class.getName()+" "+android.os.Process.myUid())
                     .redirectOutput(ProcessBuilder.Redirect.to(new File("/dev/null"))).redirectError(ProcessBuilder.Redirect.to(new File("/dev/null"))).start();
                 OutputStream pipe=next.getOutputStream();pipe.write((token+"\n").getBytes(java.nio.charset.StandardCharsets.US_ASCII));pipe.flush();
-                main.post(()->{process=next;ownerPipe=pipe;});
+                main.post(()->{if(stopped||launch!=launchId){try{pipe.close();}catch(Exception ignored){}return;}starting=false;process=next;ownerPipe=pipe;});
                 new Thread(()->{try{next.waitFor();}catch(InterruptedException ignored){}main.post(()->{if(process==next){process=null;setError("E_ROOT_BRIDGE_EXIT");}});},"root-exit").start();
-            }catch(Exception ignored){main.post(()->setError("E_ROOT_START"));}
+            }catch(Exception ignored){main.post(()->{starting=false;if(!stopped&&launch==launchId)setError("E_ROOT_START");});}
         });
-        main.postDelayed(()->{if(broker==null)setError("E_ROOT_TIMEOUT");},12000);
+        main.postDelayed(()->{if(!stopped&&launch==launchId&&broker==null)setError("E_ROOT_TIMEOUT");},12000);
     }
     private void prepare(boolean enable){
         final IInputBroker b=broker;final String t=token;final long epoch=++localEpoch;
@@ -107,29 +109,32 @@ public final class SessionService extends Service {
     }
     InputForwarder newForwarder(){
         final IInputBroker b=broker;final String t=token;final long g=generation,epoch=localEpoch;
-        return new InputForwarder((channel,bytes)->{
+        InputForwarder forwarder=new InputForwarder((channel,bytes)->{
             if(!inputOpen||epoch!=inputEpoch)return false;
             boolean ok=false;try{ok=b.write(t,g,channel,bytes);}catch(Exception ignored){}
             delivered=ok;
             if(!ok)main.post(()->{if(epoch==localEpoch){manual=true;gate(false);detail="输入投递失败或逃生键释放；请在设置恢复";changed();}});
             return ok;
         });
+        int mode=Math.max(0,Math.min(2,getSharedPreferences("settings",0).getInt("mode",0)));
+        forwarder.setInputMode(InputMode.values()[mode]);
+        return forwarder;
     }
     String status(){return SessionPolicy.NAMES[route]+"\n"+detail+"\n输入: "+(canInput()?"普通转发就绪":"已暂停")+" · 最近投递: "+(delivered?"成功":"未确认")+"\nexclusive配置: "+(getSharedPreferences("settings",0).getBoolean("exclusive",true)?"开启":"关闭")+" · 实际held: 否（grab未完成）";}
-    private void setError(String code){connected=false;gate(false);detail=code;changed();}
-    private void changed(){notifyState();if(display!=null)display.updateStatus();}
+    private void setError(String code){if(stopped)return;preparing=false;connected=false;gate(false);detail=code;changed();}
+    private void changed(){if(stopped)return;notifyState();if(display!=null)display.updateStatus();}
     private PendingIntent activity(Class<?> cls,int id){return PendingIntent.getActivity(this,id,new Intent(this,cls).addFlags(Intent.FLAG_ACTIVITY_REORDER_TO_FRONT),PendingIntent.FLAG_IMMUTABLE|PendingIntent.FLAG_UPDATE_CURRENT);}
     private PendingIntent action(String action,int id){return PendingIntent.getService(this,id,new Intent(this,SessionService.class).setAction(action),PendingIntent.FLAG_IMMUTABLE|PendingIntent.FLAG_UPDATE_CURRENT);}
     private void notifyState(){
         Notification.Builder n=new Notification.Builder(this,"session").setSmallIcon(android.R.drawable.ic_menu_view).setContentTitle(SessionPolicy.NAMES[route]).setContentText(detail)
-            .setContentIntent(activity(DisplayActivity.class,1)).setOngoing(true)
-            .addAction(new Notification.Action.Builder(null,"返回设置",activity(SettingsActivity.class,2)).build())
+            .setContentIntent(activity(SettingsActivity.class,2)).setSubText("点击通知返回设置").setOngoing(true)
             .addAction(new Notification.Action.Builder(null,"返回显示",activity(DisplayActivity.class,1)).build())
             .addAction(new Notification.Action.Builder(null,"释放输入",action(RELEASE,3)).build())
             .addAction(new Notification.Action.Builder(null,"断开（不关VM）",action(DISCONNECT,4)).build());
         startForeground(1,n.build(),ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE);
     }
     private void disconnect(){
+        stopped=true;++launchId;starting=false;
         connected=false;gate(false);
         if(display!=null)display.disconnected();
         try{if(ownerPipe!=null)ownerPipe.close();}catch(Exception ignored){}
