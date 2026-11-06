@@ -63,19 +63,45 @@ public final class MainActivity extends Activity {
                 if (!VM.equals(manifest.getString("vm_id")))
                     throw new Exception("\u542f\u52a8\u5668 VM \u6e05\u5355\u4e0d\u4e00\u81f4\u3002");
                 JSONObject files = manifest.getJSONObject("files");
-                StringBuilder check = new StringBuilder("set -e\n");
-                for (var it = files.keys(); it.hasNext();) {
-                    String path = it.next();
-                    String hash = files.getString(path);
-                    if (!path.matches("/[a-zA-Z0-9_./-]+") || !hash.matches("[a-f0-9]{64}"))
-                        throw new Exception("runtime \u6821\u9a8c\u6e05\u5355\u65e0\u6548\u3002");
-                    check.append("test \"$(sha256sum '").append(path)
-                        .append("' | cut -d ' ' -f 1)\" = '").append(hash).append("'\n");
+                // Stable numbers, independent of JSONObject iteration order. Never change the
+                // expected hashes to accommodate an environment/namespace failure.
+                String[] paths = {
+                    "/data/data/cn.classfun.droidvm/usr/bin/crosvm",
+                    "/data/data/cn.classfun.droidvm/usr/bin/crosvm.orig",
+                    "/data/data/cn.classfun.droidvm/usr/bin/crosvm.dbg-gfxstream-wrapper",
+                    "/data/local/tmp/droidvm-native-pair-v1/lib/libgfxstream_backend.so"
+                };
+                if (files.length() != paths.length) throw new Exception("invalid manifest");
+                for (String path : paths)
+                    if (!files.getString(path).matches("[a-f0-9]{64}"))
+                        throw new Exception("invalid manifest");
+                stage = "HASH_TOOL";
+                if (!root("if [ -x /system/bin/sha256sum ]; then printf READY; fi").equals("READY"))
+                    throw new Exception("hash tool unavailable");
+                for (int i = 0; i < paths.length; i++) {
+                    String path = paths[i];
+                    stage = String.format(java.util.Locale.ROOT, "HASH_EXEC_%d", i + 1);
+                    // Shell builtins plus one absolute executable: no PATH, cut or pipeline.
+                    // MISSING/READ are emitted only by these branches, not copied from stderr.
+                    String digest = root(String.format(java.util.Locale.ROOT,
+                        "if [ ! -f '%1$s' ]; then printf MISSING; "
+                        + "elif [ ! -r '%1$s' ]; then printf READ; "
+                        + "else value=$(/system/bin/sha256sum '%1$s'); rc=$?; "
+                        + "if [ \"$rc\" -ne 0 ]; then printf READ; else printf '%%s' \"$value\"; fi; fi",
+                        path));
+                    if (digest.equals("MISSING") || digest.equals("READ")) {
+                        stage = String.format(java.util.Locale.ROOT, "HASH_%s_%d", digest, i + 1);
+                        throw new Exception("runtime file unavailable");
+                    }
+                    stage = String.format(java.util.Locale.ROOT, "HASH_OUTPUT_%d", i + 1);
+                    var match = java.util.regex.Pattern.compile(
+                        String.format(java.util.Locale.ROOT, "^([a-fA-F0-9]{64})[ \\t]+\\*?%s$",
+                            java.util.regex.Pattern.quote(path))).matcher(digest);
+                    if (!match.matches()) throw new Exception("unexpected hash output");
+                    stage = String.format(java.util.Locale.ROOT, "HASH_MISMATCH_%d", i + 1);
+                    if (!files.getString(path).equalsIgnoreCase(match.group(1)))
+                        throw new Exception("runtime hash mismatch");
                 }
-                check.append("printf verified");
-                stage = "HASH";
-                if (!root(check.toString()).equals("verified"))
-                    throw new Exception("runtime \u6821\u9a8c\u672a\u901a\u8fc7\uff0c\u8bf7\u5148\u5b8c\u6210\u53d7\u63a7\u90e8\u7f72\u3002");
                 // Read credentials only into memory; never include them in a command, log or UI.
                 stage = "AUTH_CONFIG";
                 String config = root(String.format(java.util.Locale.ROOT,
@@ -164,7 +190,11 @@ public final class MainActivity extends Activity {
     }
 
     private static String root(String command) throws Exception {
-        Process process = new ProcessBuilder("su", "-c", command).redirectErrorStream(true).start();
+        // KernelSU app data isolation hides DroidVM's private directory in this app's
+        // inherited mount namespace. Select the existing host namespace; do not alter mounts.
+        // Keep su warnings out of data-bearing stdout (hashes, port/token, am result).
+        Process process = new ProcessBuilder("su", "-M", "-c", command)
+            .redirectError(ProcessBuilder.Redirect.to(new java.io.File("/dev/null"))).start();
         try {
             if (!process.waitFor(20, TimeUnit.SECONDS)) {
                 process.destroyForcibly();

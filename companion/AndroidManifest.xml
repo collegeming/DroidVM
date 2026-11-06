@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<manifest xmlns:android="http://schemas.android.com/apk/res/android" package="io.github.collegeming.archlauncher" android:versionCode="2" android:versionName="1.1-diagnostics">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android" package="io.github.collegeming.archlauncher" android:versionCode="3" android:versionName="1.2-host-namespace">
     <uses-sdk android:minSdkVersion="33" android:targetSdkVersion="36" />
     <uses-permission android:name="android.permission.INTERNET" />
     <application android:label="Arch Linux" android:allowBackup="false" android:theme="@android:style/Theme.Material.Light.NoActionBar" android:usesCleartextTraffic="true">
