@@ -6,13 +6,13 @@ on:
         description: 'Optional reviewed inventory JSON; enables candidate only if offline gates pass'
         required: false
         type: string
-  push:
-    branches: [unified-vm-profiles-v1]
-    paths: ['runtime-profiles/**', '.github/workflows/runtime-profiles.yml']
       probe_nonce:
         description: 'Optional 32 hex nonce; TEST_ONLY root gate required for one start'
         required: false
         type: string
+  push:
+    branches: [unified-vm-profiles-v1]
+    paths: ['runtime-profiles/**', '.github/workflows/runtime-profiles.yml']
 permissions:
   contents: read
 jobs:
