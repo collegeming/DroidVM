@@ -29,7 +29,7 @@ def compile_manifest(data):
         assert len(socket.encode()) < 108
         ident = p['uuid']
         service = f'name=droidvm_disp_{ident}_gpu-0,screen=gpu-0'
-        rows.append('{' + ','.join([q(p['id']), q(p['uuid']), q(p['disk']['path']), str(p['disk']['dev']), str(p['disk']['ino']), q(p['kernel']['path']), q(p['initrd']['path']), q(socket), q(service), q(p['runtime']['path']), q(p['library_path']), str(int(p['enabled'])), str(len(files)), str(len(paths)), str(len(envs)), str(len(p['environment']))]) + '}')
+        rows.append('{' + ','.join([q(p['id']), q(p['uuid']), q(p['disk']['path']), q(p['disk']['backend_path']), str(p['disk']['dev']), str(p['disk']['ino']), q(p['kernel']['path']), q(p['initrd']['path']), q(socket), q(service), q(p['runtime']['path']), q(p['library_path']), str(int(p['enabled'])), str(len(files)), str(len(paths)), str(len(envs)), str(len(p['environment']))]) + '}')
         files.extend('{' + q(f['path']) + ',' + q(f['sha256']) + '}' for f in paths)
         envs.extend('{' + q(k) + ',' + q(v) + '}' for k, v in p['environment'].items())
     return ('static const struct Profile profiles[] = {' + ',\n'.join(rows) + '};\n'

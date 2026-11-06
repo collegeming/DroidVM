@@ -30,7 +30,9 @@ class Profiles(unittest.TestCase):
         for i, p in enumerate(cls.m['profiles']):
             disk = cls.d / f'disk{i}'
             disk.write_bytes(b'QFI\xfb' + b'\0' * 20 if i == 1 else b'raw-disk-data')
-            p['disk'].update(path=str(disk), dev=disk.stat().st_dev, ino=disk.stat().st_ino)
+            backend = cls.d / f'backend{i}'
+            backend.write_bytes(disk.read_bytes())
+            p['disk'].update(path=str(disk), backend_path=str(backend), dev=disk.stat().st_dev, ino=disk.stat().st_ino)
             for key in ('kernel', 'initrd', 'runtime'):
                 p[key] = {'path': str(runtime), 'sha256': cls.digest}
             p['libraries'] = []
@@ -78,6 +80,7 @@ class Profiles(unittest.TestCase):
         self.assertEqual(data['locks'], [True, True])
         expected = args.copy()
         expected.remove('--droidvm-profile-guard=v1')
+        expected[expected.index('--block') + 1] = self.m['profiles'][1]['disk']['backend_path'] + ',lock=false'
         actual = data['argv']
         gi = actual.index('--gpu') + 1
         self.assertIn('context-types=virgl2:drm', actual[gi])
@@ -98,6 +101,25 @@ class Profiles(unittest.TestCase):
         argv = json.loads(result.stdout)['argv']
         self.assertIn('fixed-blob-mapping=true', argv[argv.index('--gpu') + 1])
         self.assertEqual(argv[-2:], ['--pre-alloc', 'gfx-host-mb=1024'])
+
+    def test_fixed_backend_alias_accepted_and_normalized(self):
+        args = self.args()
+        args[args.index('--block') + 1] = self.m['profiles'][1]['disk']['backend_path'] + ',lock=false'
+        result = self.run_dispatch(args)
+        self.assertEqual(result.returncode, 32, result.stderr)
+        actual = json.loads(result.stdout)['argv']
+        self.assertEqual(actual[actual.index('--block') + 1], self.m['profiles'][1]['disk']['backend_path'] + ',lock=false')
+        args[args.index('--block') + 1] += '.other'
+        self.assertEqual(self.run_dispatch(args).returncode, 78)
+
+    def test_backend_alias_different_contents_refused(self):
+        path = Path(self.m['profiles'][1]['disk']['backend_path'])
+        original = path.read_bytes()
+        path.write_bytes(b'x' + original[1:])
+        try:
+            self.assertEqual(self.run_dispatch(self.args()).returncode, 78)
+        finally:
+            path.write_bytes(original)
 
     def test_failclosed_mutations(self):
         for option in ('--block', '--initrd', '--socket', '--android-display-service', '--input'):
@@ -132,7 +154,7 @@ class Profiles(unittest.TestCase):
             self.assertEqual(self.run_dispatch(self.args(0), 'gfxstream-v1').returncode, 78)
         fdpath = self.d / 'proc' / '999999' / 'fd'
         fdpath.mkdir(parents=True)
-        (fdpath / '7').symlink_to(self.m['profiles'][1]['disk']['path'])
+        (fdpath / '7').symlink_to(self.m['profiles'][1]['disk']['backend_path'])
         try:
             self.assertEqual(self.run_dispatch(self.args()).returncode, 78)
         finally:

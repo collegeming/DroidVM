@@ -13,7 +13,7 @@
 #include <sys/wait.h>
 #include <unistd.h>
 
-struct Profile { const char *id,*uuid,*disk; unsigned long long dev,ino;
+struct Profile { const char *id,*uuid,*disk,*backend_disk; unsigned long long dev,ino;
  const char *kernel,*initrd,*socket,*service,*runtime,*libpath;
  int enabled,file_start,file_count,env_start,env_count; };
 struct FileHash { const char *path,*sha; };
@@ -56,9 +56,16 @@ static void verify_files(const struct Profile *p) {
   if(!regular(files[i].path)||!hash_ok(files[i].path,files[i].sha)) fail(files[i].path);
 }
 static struct stat disk_identity(const struct Profile *p) {
- struct stat s; if(lstat(p->disk,&s)||!S_ISREG(s.st_mode)) fail("disk path invalid");
+ struct stat s,visible; if(lstat(p->backend_disk,&s)||!S_ISREG(s.st_mode)||lstat(p->disk,&visible)||!S_ISREG(visible.st_mode)||s.st_size!=visible.st_size) fail("disk alias mapping invalid");
+ int a=open(p->disk,O_RDONLY|O_NOFOLLOW|O_CLOEXEC),b=open(p->backend_disk,O_RDONLY|O_NOFOLLOW|O_CLOEXEC);
+ if(a<0||b<0) fail("disk alias mapping unreadable");
+ unsigned char x[65536],y[65536];
+ off_t positions[2]={0,s.st_size>(off_t)sizeof(x)?s.st_size-(off_t)sizeof(x):0};
+ size_t count=s.st_size<(off_t)sizeof(x)?(size_t)s.st_size:sizeof(x);
+ for(int k=0;k<2;k++) if(pread(a,x,count,positions[k])!=(ssize_t)count||pread(b,y,count,positions[k])!=(ssize_t)count||memcmp(x,y,count)) fail("disk aliases differ");
+ close(a); close(b);
  for(size_t i=0;i<sizeof(profiles)/sizeof(*profiles);i++) if(&profiles[i]!=p) {
-  struct stat other; if(!stat(profiles[i].disk,&other)&&s.st_dev==other.st_dev&&s.st_ino==other.st_ino) fail("profiles share a disk inode");
+  struct stat other; if(!stat(profiles[i].backend_disk,&other)&&s.st_dev==other.st_dev&&s.st_ino==other.st_ino) fail("profiles share a disk inode");
  }
  return s;
 }
@@ -158,7 +165,7 @@ static void check_input(const char *v,const struct Profile *p) {
 static int managed_reference(int argc,char **argv) {
  for(int i=1;i<argc;i++) for(size_t j=0;j<sizeof(profiles)/sizeof(*profiles);j++) {
   const struct Profile *p=&profiles[j];
-  if(strstr(argv[i],p->disk)||strstr(argv[i],p->kernel)||strstr(argv[i],p->initrd)||strstr(argv[i],p->uuid)||strstr(argv[i],p->socket)) return 1;
+  if(strstr(argv[i],p->disk)||strstr(argv[i],p->backend_disk)||strstr(argv[i],p->kernel)||strstr(argv[i],p->initrd)||strstr(argv[i],p->uuid)||strstr(argv[i],p->socket)) return 1;
  }
  return 0;
 }
@@ -191,9 +198,10 @@ int main(int argc,char **argv) {
    continue;
   }
   if((v=value(argc,argv,&i,"--block"))) {
-   if(blocks++||!path_value(v,p->disk)) fail("disk path mismatch");
-   const char *tail=v+strlen(p->disk); if(*tail&&!same(tail,",lock=false")) fail("unsupported disk options");
-   char *block=malloc(strlen(p->disk)+12); if(!block) fail("allocation"); sprintf(block,"%s,lock=false",p->disk);
+   if(blocks++||(!path_value(v,p->disk)&&!path_value(v,p->backend_disk))) fail("disk path mismatch");
+   const char *matched=path_value(v,p->disk)?p->disk:p->backend_disk;
+   const char *tail=v+strlen(matched); if(*tail&&!same(tail,",lock=false")) fail("unsupported disk options");
+   char *block=malloc(strlen(p->backend_disk)+12); if(!block) fail("allocation"); sprintf(block,"%s,lock=false",p->backend_disk);
    out[n++]="--block"; out[n++]=block; continue;
   }
   else if((v=value(argc,argv,&i,"--initrd"))) { if(initrds++||!same(v,p->initrd)) fail("initrd mismatch"); }
@@ -220,13 +228,13 @@ int main(int argc,char **argv) {
  (void)take_lock(p->uuid);
  struct stat initial=disk_identity(p); refuse_external_open(&initial);
  for(size_t j=0;j<sizeof(profiles)/sizeof(*profiles);j++) if(&profiles[j]!=p) {
-  struct stat other; if(stat(profiles[j].disk,&other)) fail("cannot inspect other managed GPU disk");
+  struct stat other; if(stat(profiles[j].backend_disk,&other)) fail("cannot inspect other managed GPU disk");
   refuse_external_open(&other);
  }
  verify_files(p);
  // FUSE has no flock; private GPU + UUID locks provide managed lifetime exclusion.
- int diskfd=open(p->disk,O_RDONLY|O_NOFOLLOW|O_CLOEXEC); if(diskfd<0) fail("managed disk unavailable");
- struct stat ds,now; if(fstat(diskfd,&ds)||lstat(p->disk,&now)||ds.st_dev!=initial.st_dev||ds.st_ino!=initial.st_ino||ds.st_dev!=now.st_dev||ds.st_ino!=now.st_ino) fail("disk changed during validation");
+ int diskfd=open(p->backend_disk,O_RDONLY|O_NOFOLLOW|O_CLOEXEC); if(diskfd<0) fail("managed disk unavailable");
+ struct stat ds,now; if(fstat(diskfd,&ds)||lstat(p->backend_disk,&now)||ds.st_dev!=initial.st_dev||ds.st_ino!=initial.st_ino||ds.st_dev!=now.st_dev||ds.st_ino!=now.st_ino) fail("disk changed during validation");
  unsigned char header[24]={0}; ssize_t bytes=pread(diskfd,header,sizeof(header),0);
  int qcow=bytes>=24&&!memcmp(header,"QFI\373",4);
  if(same(p->id,"panvk-v1")) {
