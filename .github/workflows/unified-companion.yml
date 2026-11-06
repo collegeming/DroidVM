@@ -29,6 +29,7 @@ jobs:
           javac --release 11 -d out/tests companion/src/io/github/collegeming/archlauncher/SessionPolicy.java companion/test/io/github/collegeming/archlauncher/SessionPolicyTest.java
           java -cp out/tests io.github.collegeming.archlauncher.SessionPolicyTest
           python3 -I companion/prepare.py fixed-source companion
+          python3 -I companion/test_source_contracts.py companion
       - name: Compile companion only
         shell: bash
         run: |

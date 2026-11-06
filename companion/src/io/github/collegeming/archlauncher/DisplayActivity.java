@@ -27,8 +27,6 @@ public final class DisplayActivity extends Activity {
     public void onCreate(Bundle state){super.onCreate(state);
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
         getWindow().setDecorFitsSystemWindows(false);
-        WindowInsetsController ctl=getWindow().getInsetsController();
-        if(ctl!=null){ctl.hide(WindowInsets.Type.systemBars());ctl.setSystemBarsBehavior(WindowInsetsController.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE);}
         area=new FrameLayout(this);area.setBackgroundColor(0xff000000);
         surface=new SurfaceView(this);surface.setFocusableInTouchMode(true);area.addView(surface,new FrameLayout.LayoutParams(1,1,Gravity.CENTER));
         cursor=new SurfaceView(this);cursor.setZOrderMediaOverlay(true);cursor.getHolder().setFormat(android.graphics.PixelFormat.TRANSLUCENT);cursor.setX(-10000);cursor.setY(-10000);area.addView(cursor,new FrameLayout.LayoutParams(64,64));
@@ -50,6 +48,7 @@ public final class DisplayActivity extends Activity {
         });
         surface.setOnGenericMotionListener((v,e)->mouse(e));
         setContentView(area);surface.requestFocus();
+        getWindow().getDecorView().post(this::applyFullscreen);
     }
     void sessionReady(){
         if(source==null&&service!=null){
@@ -97,8 +96,15 @@ public final class DisplayActivity extends Activity {
         }
         return super.dispatchKeyEvent(e);
     }
-    protected void onResume(){super.onResume();resumed=true;manualGate=false;main.post(findSession);refreshGate();}
+    private void applyFullscreen(){
+        if(isFinishing()||isDestroyed()||area==null)return;
+        View decor=getWindow().getDecorView();
+        if(!decor.isAttachedToWindow())return;
+        WindowInsetsController ctl=decor.getWindowInsetsController();
+        if(ctl!=null){ctl.setSystemBarsBehavior(WindowInsetsController.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE);ctl.hide(WindowInsets.Type.systemBars());}
+    }
+    protected void onResume(){super.onResume();resumed=true;manualGate=false;main.post(findSession);getWindow().getDecorView().post(this::applyFullscreen);refreshGate();}
     protected void onPause(){resumed=false;main.removeCallbacks(findSession);suspend();super.onPause();}
-    public void onWindowFocusChanged(boolean focus){super.onWindowFocusChanged(focus);refreshGate();}
+    public void onWindowFocusChanged(boolean focus){super.onWindowFocusChanged(focus);if(focus)applyFullscreen();refreshGate();}
     protected void onDestroy(){if(service!=null)service.removeDisplay(this);disconnected();super.onDestroy();}
 }

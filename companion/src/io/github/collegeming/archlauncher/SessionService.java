@@ -52,7 +52,7 @@ public final class SessionService extends Service {
             int requested=SessionPolicy.route(intent.getIntExtra("route",0));
             if(process==null&&!starting) {route=requested;manual=false;startBroker();}
             else if(requested!=route) {detail="切换路线前请先断开；VM不会被关闭";changed();}
-            else {manual=false;if(display!=null)display.refreshGate();changed();}
+            else {manual=false;if(broker!=null&&!connected&&!preparing)prepare(false);else if(display!=null)display.refreshGate();changed();}
         }
         return START_NOT_STICKY;
     }
@@ -81,7 +81,12 @@ public final class SessionService extends Service {
             try{
                 long next=b.attach(t,SessionPolicy.IDS[route],lifetime);
                 main.post(()->{
-                    if(epoch!=localEpoch){control.execute(()->{try{b.releaseAll(t,next);}catch(Exception ignored){}});preparing=false;if(display!=null)display.refreshGate();return;}
+                    if(epoch!=localEpoch){
+                        control.execute(()->{try{b.releaseAll(t,next);}catch(Exception ignored){}});
+                        preparing=false;
+                        if(!stopped){generation=next;connected=true;armed=false;inputOpen=false;detail="管理VM已连接，输入暂停";changed();if(display!=null)display.sessionReady();}
+                        return;
+                    }
                     preparing=false;generation=next;connected=true;armed=enable;inputEpoch=epoch;inputOpen=enable&&!manual;detail="管理VM已连接";changed();
                     if(display!=null)display.sessionReady();
                 });
