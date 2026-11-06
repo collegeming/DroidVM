@@ -1,0 +1,10 @@
+{
+  "revision": "native-pair-v1-20261106",
+  "vm_id": "d570d1fd-afcf-407d-a82c-fccadc203cf1",
+  "files": {
+    "/data/data/cn.classfun.droidvm/usr/bin/crosvm": "525300ff2f0713714ee9f5052f18174b35dee95ebed1fb5eea941ec7e4a83ffb",
+    "/data/data/cn.classfun.droidvm/usr/bin/crosvm.orig": "6a952ad1256da68246a0b8230c457ac5266aba62d9362b58fbfc5003b7faa514",
+    "/data/data/cn.classfun.droidvm/usr/bin/crosvm.dbg-gfxstream-wrapper": "45d581b946d7c40250d04de4eef3ae6e73ce57f5f41bfe883ff63533fdd26b6f",
+    "/data/local/tmp/droidvm-native-pair-v1/lib/libgfxstream_backend.so": "1b2969807c20f0bbcce1440f56c8bf29d7b60c50cf40cd1dc2b28e76abf086ed"
+  }
+}

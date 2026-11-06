@@ -26,4 +26,7 @@ oneway interface IPhysicalKeyEcho {
      * one, its state is genuinely unknown here, because virtio-input has no way to ask.
      */
     void onLeds(int known, int on);
+
+    /** The root side relinquished ownership (including the emergency chord). */
+    void onReleased();
 }

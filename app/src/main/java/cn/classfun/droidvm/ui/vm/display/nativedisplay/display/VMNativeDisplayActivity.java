@@ -389,6 +389,7 @@ public final class VMNativeDisplayActivity extends AppCompatActivity
 
     private void onDisplayStateChanged(@NonNull DisplaySource.State state) {
         connected = state == DisplaySource.State.CONNECTED;
+        keyboardGrab.setConnected(connected);
         if (connected) {
             setStatus(fmt(getString(R.string.native_display_connected), guestWidth, guestHeight),
                 R.color.vnc_status_connected);
@@ -754,8 +755,40 @@ public final class VMNativeDisplayActivity extends AppCompatActivity
     }
 
     @Override
+    public void onWindowFocusChanged(boolean hasFocus) {
+        super.onWindowFocusChanged(hasFocus);
+        if (keyboardGrab != null) keyboardGrab.setFocused(hasFocus);
+    }
+
+    private boolean captureChordPending;
+
+    @Override
     public boolean dispatchKeyEvent(@NonNull KeyEvent event) {
         int keyCode = event.getKeyCode();
+        if (keyCode == KeyEvent.KEYCODE_F12
+            && (captureChordPending || (event.isCtrlPressed() && event.isAltPressed()))) {
+            if (event.getAction() == KeyEvent.ACTION_DOWN && event.getRepeatCount() == 0)
+                captureChordPending = true;
+            // Enable on key-up so the triggering F12 down cannot strand a guest key. The
+            // root side sees the chord when already grabbed and releases independently.
+            if (event.getAction() == KeyEvent.ACTION_UP && captureChordPending) {
+                captureChordPending = false;
+                if (inputForwarder != null) {
+                    for (int modifier : new int[]{KeyEvent.KEYCODE_CTRL_LEFT,
+                            KeyEvent.KEYCODE_CTRL_RIGHT, KeyEvent.KEYCODE_ALT_LEFT,
+                            KeyEvent.KEYCODE_ALT_RIGHT, KeyEvent.KEYCODE_SHIFT_LEFT,
+                            KeyEvent.KEYCODE_SHIFT_RIGHT, KeyEvent.KEYCODE_META_LEFT,
+                            KeyEvent.KEYCODE_META_RIGHT})
+                        inputForwarder.sendKeyEvent(modifier, false);
+                }
+                boolean grabbed = keyboardGrab.toggleEnabled();
+                android.widget.Toast.makeText(this, grabbed
+                    ? "Keyboard exclusive: Ctrl+Alt+F12 to release"
+                    : "Keyboard shared (requires focused, connected non-SYSTEM display)",
+                    android.widget.Toast.LENGTH_SHORT).show();
+            }
+            return true;
+        }
         // A hardware-mouse right-click the framework (or OEM ROM) failed to see consumed gets
         // synthesized as a BACK key - sometimes mouse-sourced, sometimes (OEM injection) claiming
         // a keyboard/virtual source. Swallow BACK when it's mouse-sourced OR arrives right after

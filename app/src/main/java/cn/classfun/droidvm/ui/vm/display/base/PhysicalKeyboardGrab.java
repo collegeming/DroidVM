@@ -84,6 +84,16 @@ public final class PhysicalKeyboardGrab {
 
     private final IPhysicalKeyEcho.Stub echoStub = new IPhysicalKeyEcho.Stub() {
         @Override
+        public void onReleased() {
+            main.post(() -> {
+                enabled = false;
+                requested = false;
+                echoRegistered = false;
+                if (listener != null) listener.onCleared();
+            });
+        }
+
+        @Override
         public void onKeys(int[] codes, int[] values) {
             if (codes == null || values == null) return;
             main.post(() -> {
@@ -104,7 +114,29 @@ public final class PhysicalKeyboardGrab {
     @Nullable
     private INativeDisplayRootService service;
     private boolean resumed;
+    private boolean focused;
+    private boolean connected;
+    private boolean enabled;
     private boolean wantsKeys;
+
+    public void setFocused(boolean focused) {
+        this.focused = focused;
+        if (!focused) enabled = false;
+        apply();
+    }
+
+    public void setConnected(boolean connected) {
+        this.connected = connected;
+        if (!connected) enabled = false;
+        apply();
+    }
+
+    public boolean toggleEnabled() {
+        enabled = !enabled && allowed && resumed && focused && connected
+            && wantsKeys && service != null;
+        apply();
+        return enabled;
+    }
     /** What was last asked for, so an unchanged state is not asked for twice. */
     private boolean requested;
     private boolean closed;
@@ -118,6 +150,14 @@ public final class PhysicalKeyboardGrab {
 
     /** The daemon's broker binder arrived, or was lost (null). */
     public void setService(@Nullable INativeDisplayRootService service) {
+        if (this.service == service) return;
+        // Release through the OLD binder before replacing it: losing the connection does not
+        // kill this process's token, so token death alone is not a release guarantee.
+        if (requested) send(false);
+        if (echoRegistered) sendEcho(false);
+        requested = false;
+        echoRegistered = false;
+        enabled = false;
         this.service = service;
         apply();
     }
@@ -125,12 +165,14 @@ public final class PhysicalKeyboardGrab {
     /** The console came to the front, or left it. */
     public void setResumed(boolean resumed) {
         this.resumed = resumed;
+        if (!resumed) enabled = false;
         apply();
     }
 
     /** The typing surface changed; only {@link KeyboardMode#SYSTEM} wants the IME to have keys. */
     public void setKeyboardMode(@NonNull KeyboardMode mode) {
         this.wantsKeys = mode != KeyboardMode.SYSTEM;
+        if (!wantsKeys) enabled = false;
         this.laptop = mode == KeyboardMode.LAPTOP;
         apply();
     }
@@ -158,14 +200,17 @@ public final class PhysicalKeyboardGrab {
 
     private void apply() {
         if (closed) return;
-        boolean want = allowed && resumed && wantsKeys && service != null;
+        boolean want = enabled && allowed && resumed && focused && connected
+            && wantsKeys && service != null;
         if (want != requested) {
             requested = want;
             send(want);
         }
         // The echo rides on the grab: no grab, no keys to copy. Registered only for the drawn
         // keyboard, so every other mode costs not one call.
-        boolean wantEcho = requested && laptop && listener != null;
+        // Always subscribe while grabbed: the root emergency release must reach the UI even
+        // when the drawn laptop keyboard is hidden.
+        boolean wantEcho = requested;
         if (wantEcho != echoRegistered) {
             echoRegistered = wantEcho;
             sendEcho(wantEcho);

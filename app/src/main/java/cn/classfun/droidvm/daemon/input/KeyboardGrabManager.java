@@ -443,16 +443,8 @@ public final class KeyboardGrabManager {
         var pending = new ArrayList<>(grabs.values());
         grabs.clear();
         for (var grab : pending) grab.wake();
-        for (var grab : pending) {
-            // Never join the thread we are on: the escape chord releases from inside its own
-            // reader, and that thread ends by itself as soon as this returns.
-            if (grab.thread == null || grab.thread == Thread.currentThread()) continue;
-            try {
-                grab.thread.join(READER_JOIN_MS);
-            } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
-            }
-        }
+        // Do not join under lock: readers serialize event delivery with this same lock.
+        // stopping prevents any later delivery; each awakened reader closes its descriptors.
         Log.i(TAG, fmt("keyboard back to Android (%s)", reason));
     }
 
@@ -467,12 +459,19 @@ public final class KeyboardGrabManager {
         ledOn = 0;
         unlinkToken(current);
         stopWatcherLocked();
+        if (current != null && current.echo != null) {
+            try { current.echo.onReleased(); }
+            catch (Exception e) { Log.d(TAG, "release notification unavailable"); }
+        }
     }
 
     /** A reader that ended on its own -- its keyboard went away -- is taken off the list. */
     private void forget(@NonNull Grab grab) {
         synchronized (lock) {
-            grabs.remove(grab.device.path, grab);
+            if (grabs.get(grab.device.path) == grab) {
+                releaseHeldKeys(grab);
+                grabs.remove(grab.device.path, grab);
+            }
         }
         // The console stays armed: a Bluetooth keyboard that dropped is expected back, and the
         // watcher is what grabs it again when it is.
@@ -564,6 +563,13 @@ public final class KeyboardGrabManager {
      * repeat every held key twice over.
      */
     private void onEvents(@NonNull Grab grab, @NonNull byte[] buffer, int length) {
+        synchronized (lock) {
+            if (grab.stopping || grabs.get(grab.device.path) != grab) return;
+            onEventsLocked(grab, buffer, length);
+        }
+    }
+
+    private void onEventsLocked(@NonNull Grab grab, @NonNull byte[] buffer, int length) {
         var in = ByteBuffer.wrap(buffer, 0, length).order(ByteOrder.LITTLE_ENDIAN);
         var out = ByteBuffer.allocate(8 * (length / EVENT_SIZE)).order(ByteOrder.LITTLE_ENDIAN);
         // The console's copy, collected alongside: same keys, same order, sent after the guest's.
@@ -618,19 +624,18 @@ public final class KeyboardGrabManager {
                 }
             }
         }
-        if (escape) {
-            // Off this thread: the release joins reader threads, and this is one of them.
-            var t = new Thread(() -> release("escape chord"), "kbd-grab-escape");
-            t.setDaemon(true);
-            t.start();
-        }
+        if (escape) releaseLocked("Ctrl+Alt+F12 escape chord");
     }
 
     /** True when every key of the escape chord is down on [grab] right now. */
     private boolean chordHeld(@NonNull Grab grab) {
         var chord = config.escapeChord;
-        if (chord.isEmpty()) return false;
         synchronized (grab.pressed) {
+            // Reserved even when an older keyboard_grab.json contains an empty escape chord.
+            // Accept left/right Ctrl and Alt; F12 is Linux KEY_F12 (88).
+            if (grab.pressed[88] && (grab.pressed[29] || grab.pressed[97])
+                && (grab.pressed[56] || grab.pressed[100])) return true;
+            if (chord.isEmpty()) return false;
             for (var code : chord) {
                 if (code < 0 || code >= KEY_COUNT || !grab.pressed[code]) return false;
             }
