@@ -3,7 +3,7 @@ on:
   workflow_dispatch:
   push:
     branches: [native-input-fd-ownership]
-    paths: ['app/src/main/java/cn/classfun/droidvm/daemon/vm/backend/Native*', 'app/src/test/**', 'scripts/ci/compile_native_input_bridge.py', '.github/workflows/native-input-lifecycle.yml']
+    paths: ['app/src/main/java/cn/classfun/droidvm/daemon/vm/backend/Native*', 'app/src/main/java/cn/classfun/droidvm/daemon/vm/SerialPipe*', 'app/src/test/**', 'scripts/ci/compile_native_input_bridge.py', '.github/workflows/native-input-lifecycle.yml']
 permissions:
   contents: read
 jobs:
@@ -23,6 +23,13 @@ jobs:
             app/src/main/java/cn/classfun/droidvm/daemon/vm/backend/NativeInputSocketOwner.java \
             app/src/test/java/cn/classfun/droidvm/daemon/vm/backend/NativeInputSocketOwnerTest.java
           timeout 60s java -cp out/native-input-tests cn.classfun.droidvm.daemon.vm.backend.NativeInputSocketOwnerTest
+      - name: Test serial pipe descriptor transfer
+        run: |
+          mkdir -p out/serial-pipe-tests
+          javac --release 11 -d out/serial-pipe-tests \
+            app/src/main/java/cn/classfun/droidvm/daemon/vm/SerialPipeFds.java \
+            app/src/test/java/cn/classfun/droidvm/daemon/vm/SerialPipeFdsTest.java
+          timeout 60s java -cp out/serial-pipe-tests cn.classfun.droidvm.daemon.vm.SerialPipeFdsTest
       - name: Test Linux listener wake and source lifecycle contracts
         run: timeout 60s python3 -I app/src/test/python/test_native_input_listener.py
       - uses: android-actions/setup-android@v3

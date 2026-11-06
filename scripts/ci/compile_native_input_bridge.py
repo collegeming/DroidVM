@@ -19,6 +19,11 @@ stubs = {
         public static int nativePollIn2(int a,int b,int t){return -1;}
         public static void nativeCloseFd(int f){}
     }''',
+    'cn/classfun/droidvm/daemon/console/FDPipeConsoleStream.java': '''package cn.classfun.droidvm.daemon.console; public class FDPipeConsoleStream {
+        public void setReadFd(int fd){} public void setWriteFd(int fd){}
+        public int getPosixReadFd(){return -1;} public int getPosixWriteFd(){return -1;}
+        public boolean isReady(){return false;} public void close(){}
+    }''',
     'cn/classfun/droidvm/lib/network/FDSocket.java': '''package cn.classfun.droidvm.lib.network; import java.io.*; public class FDSocket {
         public FDSocket(int f){} public void close(){} public boolean isOpen(){return false;}
         public InputStream getInputStream() throws IOException {return null;}
@@ -39,5 +44,6 @@ for name, text in stubs.items():
     files.append(str(target))
 base=root/'app/src/main/java/cn/classfun/droidvm/daemon/vm/backend'
 files.extend(str(base/name) for name in ('NativeInputSocketOwner.java','NativeDisplayInputBridge.java'))
+files.extend(str(base.parent/name) for name in ('SerialPipe.java','SerialPipeFds.java'))
 subprocess.run(['javac','--release','11','-cp',str(api),'-d',str(out/'classes'),*files],check=True)
 print('Actual bridge SDK API compilation passed; dependency stubs, no full APK/JNI/device claim')
