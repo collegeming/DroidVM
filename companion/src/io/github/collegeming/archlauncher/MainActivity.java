@@ -73,8 +73,9 @@ public final class MainActivity extends Activity {
                 if (!root(check.toString()).equals("verified"))
                     throw new Exception("runtime \u6821\u9a8c\u672a\u901a\u8fc7\uff0c\u8bf7\u5148\u5b8c\u6210\u53d7\u63a7\u90e8\u7f72\u3002");
                 // Read credentials only into memory; never include them in a command, log or UI.
-                String config = root("cat " + BASE + "run/droidvmd-port.txt; printf '\\n'; cat "
-                    + BASE + "run/droidvmd-token.txt").trim();
+                String config = root(String.format(java.util.Locale.ROOT,
+                    "cat %srun/droidvmd-port.txt; printf '\\n'; cat %srun/droidvmd-token.txt",
+                    BASE, BASE)).trim();
                 String[] values = config.split("\\s+", 2);
                 if (values.length != 2) throw new Exception("daemon \u672a\u51c6\u5907\u597d\uff0c\u8bf7\u5148\u5b8c\u6210\u53d7\u63a7\u542f\u52a8\u3002");
                 int port = Integer.parseInt(values[0]);
@@ -112,9 +113,8 @@ public final class MainActivity extends Activity {
                         if (usesArchDisk(configPeer)) throw new Exception("shared disk busy");
                     }
                 }
-                String activityResult = root("am start -W --activity-single-top --activity-reorder-to-front -n cn.classfun.droidvm/.ui.vm.display.nativedisplay.display.VMNativeDisplayActivity"
-                    + " --es vm_id " + VM + " --es vm_name arch-niri-mali --es screen gpu-0"
-                    + " --ez input_enabled true --el display_width 2272 --el display_height 1514");
+                String activityResult = root(String.format(java.util.Locale.ROOT,
+                    "am start -W --activity-single-top --activity-reorder-to-front -n cn.classfun.droidvm/.ui.vm.display.nativedisplay.display.VMNativeDisplayActivity --es vm_id %s --es vm_name arch-niri-mali --es screen gpu-0 --ez input_enabled true --el display_width 2272 --el display_height 1514", VM));
                 String amResult = activityResult.toLowerCase(java.util.Locale.ROOT);
                 if (amResult.contains("error") || amResult.contains("exception")
                     || !amResult.matches("(?s).*status:\\s*ok\\b.*"))
@@ -138,7 +138,7 @@ public final class MainActivity extends Activity {
         var disks = config.getJSONArray("disks");
         for (int i = 0; i < disks.length(); i++) {
             String path = disks.getJSONObject(i).getString("path");
-            if (path.equals(BASE + "files/arch.img")
+            if (path.equals("/data/data/cn.classfun.droidvm/files/arch.img")
                 || path.equals("/data/user/0/cn.classfun.droidvm/files/arch.img")) return true;
         }
         return false;
