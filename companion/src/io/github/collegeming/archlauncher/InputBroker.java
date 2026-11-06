@@ -102,6 +102,7 @@ public final class InputBroker {
         if(!releaseFailed)vm=null;
         revoked.remove(expected);
     }
+    private int modifierMask(){int mask=0;for(int code:modifiers)mask|=ChordPolicy.modifier(code);return mask;}
     private int writeNow(long session,int channel,byte[] bytes,MonotonicDeadline budget){
         if(budget.millis()==0)return BrokerGate.IPC_ERROR;
         int state=gate.status(session);if(state!=0)return state;
@@ -113,7 +114,7 @@ public final class InputBroker {
             if(type>3)return BrokerGate.INVALID;
             if(channel==1&&type==1){
                 if(value==0)modifiers.remove(code);else modifiers.add(code);
-                if(value!=0&&physical.releaseChord(session,code,modifiers.contains(29)||modifiers.contains(97),modifiers.contains(56)||modifiers.contains(100))){physical.release(session,"ESCAPE_RELEASED");gate.pause(session,BrokerGate.ESCAPE);revoked.add(session);release(new MonotonicDeadline(RELEASE_MS));return BrokerGate.ESCAPE;}
+                if(value!=0&&physical.releaseChord(session,code,modifierMask())){physical.release(session,"ESCAPE_RELEASED");gate.pause(session,BrokerGate.ESCAPE);revoked.add(session);release(new MonotonicDeadline(RELEASE_MS));return BrokerGate.ESCAPE;}
             }
         }
         data.rewind();while(data.remaining()>=8){
@@ -187,11 +188,12 @@ public final class InputBroker {
             check(supplied);if(revoked.contains(session))return BrokerGate.PAUSED;
             MonotonicDeadline budget=new MonotonicDeadline(2500);return call(budget,()->writeNow(session,channel,bytes,budget),BrokerGate.IPC_ERROR);
         }
-        public String keyboardGrab(String supplied,long session,boolean enabled,int releasePreset){
+        public String keyboardGrab(String supplied,long session,boolean enabled,String chord){
             check(supplied);
             if(!enabled){physical.release(session,"DISABLED");return physical.status();}
             // PhysicalGrab.arm authorizes and mutates atomically under the publication/revocation lease.
-            return physical.arm(session,releasePreset);
+            ChordPolicy configured=ChordPolicy.decode(chord);if(configured==null)throw new IllegalArgumentException("invalid chord schema");
+            return physical.arm(session,configured);
         }
         public String grabStatus(String supplied,long session){
             check(supplied);return physical.status();

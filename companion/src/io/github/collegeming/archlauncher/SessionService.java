@@ -89,7 +89,7 @@ public final class SessionService extends Service {
     }
     private void releaseRemote(IInputBroker b,String t,long g){
         if(b!=null&&g>0){
-            try{urgent.execute(()->{try{String value=b.keyboardGrab(t,g,false,2);main.post(()->{if(generation==g&&lease.ticket()==null){try{keyboardHeld=new org.json.JSONObject(value).getJSONArray("held").length();grabDetail="键盘held: "+keyboardHeld+"（已回读）";}catch(Exception ignored){}if(display!=null)display.updateStatus();}});}catch(Exception ignored){}});}catch(RejectedExecutionException ignored){}
+            try{urgent.execute(()->{try{String value=b.keyboardGrab(t,g,false,ChordPolicy.DEFAULT.encode());main.post(()->{if(generation==g&&lease.ticket()==null){try{keyboardHeld=new org.json.JSONObject(value).getJSONArray("held").length();grabDetail="键盘held: "+keyboardHeld+"（已回读）";}catch(Exception ignored){}if(display!=null)display.updateStatus();}});}catch(Exception ignored){}});}catch(RejectedExecutionException ignored){}
             try{control.execute(()->{try{b.releaseAll(t,g);}catch(Exception ignored){}});}catch(RejectedExecutionException ignored){}
         }
     }
@@ -117,10 +117,10 @@ public final class SessionService extends Service {
     }
     private void armKeyboard(IInputBroker b,String t,InputLease.Ticket ticket){
         boolean requested=getSharedPreferences("settings",0).getBoolean("exclusive",true);
-        int releasePreset=HotkeyPolicy.preset(getSharedPreferences("settings",0).getInt("release_hotkey",2),2);
+        String configuredChord=ChordSettings.load(getSharedPreferences("settings",0)).encode();
         urgent.execute(()->{
             if(!lease.current(ticket))return;
-            try{String value=b.keyboardGrab(t,ticket.generation,requested,releasePreset);if(!lease.current(ticket)){b.keyboardGrab(t,ticket.generation,false,releasePreset);return;}main.post(()->applyGrabStatus(ticket,value));}
+            try{String value=b.keyboardGrab(t,ticket.generation,requested,configuredChord);if(!lease.current(ticket)){b.keyboardGrab(t,ticket.generation,false,configuredChord);return;}main.post(()->applyGrabStatus(ticket,value));}
             catch(Exception ignored){main.post(()->{if(lease.current(ticket))grabDetail="键盘grab不可用；普通转发";});}
         });
     }
@@ -156,6 +156,16 @@ public final class SessionService extends Service {
     void attachDisplay(DisplayActivity activity){if(display!=activity){gate(false);display=activity;}if(connected)activity.sessionReady();changed();}
     void removeDisplay(DisplayActivity activity){if(display==activity){gate(false);display=null;}}
     boolean canInput(){return connected&&!inputBlocked()&&lease.current(lease.ticket());}
+    void toggleByHotkey(){
+        if(!connected||display==null)return;
+        if(!canInput()){resumeByHotkey();return;}
+        final IInputBroker b=broker;final String t=token;final InputLease.Ticket ticket=lease.ticket();
+        urgent.execute(()->{
+            String rootReason="";try{rootReason=new org.json.JSONObject(b.grabStatus(t,ticket.generation)).optString("reason","");}catch(Exception ignored){}
+            final boolean rootReleased="ESCAPE_RELEASED".equals(rootReason);
+            main.post(()->{if(!lease.current(ticket))return;if(rootReleased){gate(false);resumeByHotkey();}else releaseByHotkey();});
+        });
+    }
     void releaseByHotkey(){manual=true;gate(false);detail="输入已由快捷键释放；进入快捷键或设置可显式恢复";changed();}
     void resumeByHotkey(){
         if(!connected||display==null)return;

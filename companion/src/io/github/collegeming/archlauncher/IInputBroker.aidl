@@ -6,7 +6,7 @@ interface IInputBroker {
     int write(String token, long generation, int channel, in byte[] bytes);
     void releaseAll(String token, long generation);
     void detach(String token, long generation);
-    String keyboardGrab(String token, long generation, boolean enabled, int releasePreset);
+    String keyboardGrab(String token, long generation, boolean enabled, String chord);
     String grabStatus(String token, long generation);
     int physicalKey(String token, long generation, String name, int vendor, int product, in byte[] bytes);
 }

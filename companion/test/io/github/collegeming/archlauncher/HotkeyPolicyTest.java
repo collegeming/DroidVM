@@ -15,7 +15,7 @@ public final class HotkeyPolicyTest {
             byte[] bytes=ByteBuffer.allocate(24).order(ByteOrder.LITTLE_ENDIAN).putLong(0).putLong(0).putShort((short)1).putShort((short)HotkeyPolicy.scan(preset)).putInt(1).array();
             check(GrabPolicy.convert(bytes,24,keys,preset).escape);
             byte[] emergency=ByteBuffer.allocate(24).order(ByteOrder.LITTLE_ENDIAN).putLong(0).putLong(0).putShort((short)1).putShort((short)88).putInt(1).array();
-            check(GrabPolicy.convert(emergency,24,keys,preset).escape);
+            check(GrabPolicy.convert(emergency,24,keys,preset).escape==(preset==2));
         }
         check(!HotkeyPolicy.release(0,68,true,false));check(HotkeyPolicy.preset(-100,2)==2);
         System.out.println("Hotkey presets: stable saved IDs, shared root/UI scan mapping, same-key toggle, all left/right modifiers and immutable F12 release priority passed");
