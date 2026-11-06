@@ -26,11 +26,12 @@ jobs:
       - name: Test session policy and assemble fixed DroidVM sources
         run: |
           mkdir -p out/tests
-          javac --release 11 -d out/tests companion/src/io/github/collegeming/archlauncher/SessionPolicy.java companion/src/io/github/collegeming/archlauncher/BrokerGate.java companion/src/io/github/collegeming/archlauncher/InputLease.java companion/src/io/github/collegeming/archlauncher/SourceLifetime.java companion/src/io/github/collegeming/archlauncher/MonotonicDeadline.java companion/src/io/github/collegeming/archlauncher/StartPolicy.java companion/src/io/github/collegeming/archlauncher/ManagedStart.java companion/src/io/github/collegeming/archlauncher/RpcFailure.java companion/test/io/github/collegeming/archlauncher/*.java
+          javac --release 11 -d out/tests companion/src/io/github/collegeming/archlauncher/SessionPolicy.java companion/src/io/github/collegeming/archlauncher/BrokerGate.java companion/src/io/github/collegeming/archlauncher/InputLease.java companion/src/io/github/collegeming/archlauncher/SourceLifetime.java companion/src/io/github/collegeming/archlauncher/MonotonicDeadline.java companion/src/io/github/collegeming/archlauncher/StartPolicy.java companion/src/io/github/collegeming/archlauncher/ManagedStart.java companion/src/io/github/collegeming/archlauncher/RpcFailure.java companion/src/io/github/collegeming/archlauncher/GrabPolicy.java companion/test/io/github/collegeming/archlauncher/*.java
           java -cp out/tests io.github.collegeming.archlauncher.SessionPolicyTest
           java -cp out/tests io.github.collegeming.archlauncher.BrokerGateTest
           java -cp out/tests io.github.collegeming.archlauncher.InputLifecycleTest
           java -cp out/tests io.github.collegeming.archlauncher.ManagedStartTest
+          java -cp out/tests io.github.collegeming.archlauncher.GrabPolicyTest
           python3 -I companion/prepare.py fixed-source companion
           python3 -I companion/test_source_contracts.py companion
       - name: Compile companion only
