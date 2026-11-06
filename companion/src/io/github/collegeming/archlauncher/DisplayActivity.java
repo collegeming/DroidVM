@@ -23,6 +23,8 @@ public final class DisplayActivity extends Activity {
     private final PointerCaptureState pointerCapture=new PointerCaptureState();
     private final PointerMotion pointerMotion=new PointerMotion();
     private boolean captureSuppressed;
+    // One focus attempt per new/recreated source, not per resume, lease, or status poll.
+    private boolean surfaceFocusPending;
     private int pointerViewWidth,pointerViewHeight,pointerGuestWidth,pointerGuestHeight;
     private float mouseX,mouseY;
     private SessionService service;
@@ -71,9 +73,14 @@ public final class DisplayActivity extends Activity {
         if(source==null&&service!=null){
             final SessionService captured=service;
             final long sourceId=sourceLifetime.begin();
+            surfaceFocusPending=true;
             source=new NativeSurfaceSource(surface,width,height,captured::displayBinder,main,new DisplaySource.Callbacks(){
                 public void onContentSize(int w,int h){if(!sourceLifetime.current(sourceId)||service!=captured)return;width=w;height=h;fit();}
-                public void onStateChanged(DisplaySource.State state){if(!sourceLifetime.current(sourceId)||service!=captured)return;displayReady=state==DisplaySource.State.CONNECTED;refreshGate();updateStatus();}
+                public void onStateChanged(DisplaySource.State state){if(!sourceLifetime.current(sourceId)||service!=captured)return;
+                    boolean ready=state==DisplaySource.State.CONNECTED;
+                    if(displayReady&&!ready)surfaceFocusPending=true; // provider lost/recreated its Surface
+                    displayReady=ready;refreshGate();updateStatus();
+                }
             });
             source.setCursorView(cursor);source.setCursorListener((x,y)->{if(!sourceLifetime.current(sourceId)||service!=captured)return;cursor.setX(surface.getX()+x*surface.getWidth()/(float)width);cursor.setY(surface.getY()+y*surface.getHeight()/(float)height);});
         }
@@ -85,7 +92,15 @@ public final class DisplayActivity extends Activity {
         boolean allowed=SessionPolicy.accepts(resumed,hasWindowFocus(),displayReady,ime,service.inputBlocked());
         if(!allowed){if(input!=null)clearInput();if(!manualGate){manualGate=true;service.gate(false);}}
         else{manualGate=false;service.gate(true);if(service.canInput()&&input==null)input=service.newForwarder();}
+        restoreSurfaceFocus();
         updatePointerCapture();
+    }
+    private void restoreSurfaceFocus(){
+        if(!surfaceFocusPending||captureSuppressed||isFinishing()||isDestroyed()
+            ||service==null||!SessionPolicy.accepts(resumed,hasWindowFocus(),displayReady,ime,service.inputBlocked())
+            ||!service.canInput()||input==null||surface==null||!surface.isAttachedToWindow())return;
+        surfaceFocusPending=false; // consume before requestFocus's synchronous focus callback
+        if(!surface.isFocused())surface.requestFocus();
     }
     void allowPointerCapture(){captureSuppressed=false;}
     void clearInput(){chordCycle.reset();stopPointerCapture();if(input!=null){input.close();input=null;}buttons=0;mouseKnown=false;touchActive=false;pointerMotion.reset();}
@@ -122,7 +137,7 @@ public final class DisplayActivity extends Activity {
         updateStatus();
     }
     private void suspend(){clearInput();if(service!=null)service.gate(false);}
-    void disconnected(){sourceLifetime.close();clearInput();if(source!=null){source.shutdown();source=null;}displayReady=false;status.setText("已断开；VM继续运行");}
+    void disconnected(){sourceLifetime.close();surfaceFocusPending=false;clearInput();if(source!=null){source.shutdown();source=null;}displayReady=false;status.setText("已断开；VM继续运行");}
     void updateStatus(){status.setText((service==null?"请先在设置连接路线":service.status()+"\nSurface: "+(displayReady?"已连接":"等待")+" · Pointer capture: "+(surface!=null&&surface.hasPointerCapture()?"实际已捕获":"未捕获"))+captureDebugState());}
     private String captureDebugState(){
         android.content.SharedPreferences prefs=getSharedPreferences("settings",0);
@@ -130,7 +145,7 @@ public final class DisplayActivity extends Activity {
         return "\nCapture gate: suppressed="+captureSuppressed+" mouseMode="+(prefs.getInt("mode",0)==1)+" enabled="+prefs.getBoolean("pointer_capture",false)
             +"\nresumed="+resumed+" windowFocus="+hasWindowFocus()+" displayReady="+displayReady+" ime="+ime
             +"\nsurfacePresent="+(surface!=null)+" focused="+(surface!=null&&surface.isFocused())+" hasFocus="+(surface!=null&&surface.hasFocus())+" attached="+(surface!=null&&surface.isAttachedToWindow())
-            +"\ninputPresent="+(input!=null)+" servicePresent="+(service!=null)+" canInput="+(service!=null&&service.canInput())+" manualGate="+manualGate+" eligible="+captureEligible()
+            +"\ninputPresent="+(input!=null)+" servicePresent="+(service!=null)+" canInput="+(service!=null&&service.canInput())+" manualGate="+manualGate+" eligible="+captureEligible()+" focusPending="+surfaceFocusPending
             +"\nCapture machine: "+pointerCapture.debugState(ticket);
     }
     private void fit(){int w=area.getWidth(),h=area.getHeight();if(w<=0||h<=0)return;if((long)w*height>(long)h*width)w=h*width/height;else h=w*height/width;surface.setLayoutParams(new FrameLayout.LayoutParams(w,h,Gravity.CENTER));}
