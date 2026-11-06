@@ -66,7 +66,7 @@ public final class SessionService extends Service {
             startAuthorized=true;
             if(process==null&&!starting) {route=requested;manual=false;startBroker();}
             else if(requested!=route) {detail="切换路线前请先断开；VM不会被关闭";changed();}
-            else {manual=false;inputFault=false;if(broker!=null&&!connected&&!lease.pending())prepare(false);else if(display!=null)display.refreshGate();changed();}
+            else {manual=false;inputFault=false;if(display!=null)display.allowPointerCapture();if(broker!=null&&!connected&&!lease.pending())prepare(false);else if(display!=null)display.refreshGate();changed();}
         }
         return START_NOT_STICKY;
     }
@@ -155,6 +155,7 @@ public final class SessionService extends Service {
     }
     void attachDisplay(DisplayActivity activity){if(display!=activity){gate(false);display=activity;}if(connected)activity.sessionReady();changed();}
     void removeDisplay(DisplayActivity activity){if(display==activity){gate(false);display=null;}}
+    Object inputLeaseIdentity(){return canInput()?lease.ticket():null;}
     boolean canInput(){return connected&&!inputBlocked()&&lease.current(lease.ticket());}
     void toggleByHotkey(){
         if(!connected||display==null)return;
@@ -169,7 +170,7 @@ public final class SessionService extends Service {
     void releaseByHotkey(){manual=true;gate(false);detail="输入已由快捷键释放；进入快捷键或设置可显式恢复";changed();}
     void resumeByHotkey(){
         if(!connected||display==null)return;
-        manual=false;inputFault=false;display.refreshGate();detail="已请求恢复输入（需显示焦点、Surface就绪且无IME）";changed();
+        manual=false;inputFault=false;display.allowPointerCapture();display.refreshGate();detail="已请求恢复输入（需显示焦点、Surface就绪且无IME）";changed();
     }
     boolean inputBlocked(){return manual||inputFault;}
     boolean isConnected(){return connected;}
@@ -220,7 +221,7 @@ public final class SessionService extends Service {
         forwarder.setInputMode(InputMode.values()[mode]);
         return forwarder;
     }
-    String status(){return SessionPolicy.NAMES[route]+"\n"+detail+"\n输入: "+(canInput()?"普通转发就绪":"已暂停")+" · 最近投递: "+(delivered?"成功":"未确认")+" · lease关闭丢弃: "+localDrops+"\nexclusive配置: "+(getSharedPreferences("settings",0).getBoolean("exclusive",true)?"开启":"关闭")+" · "+grabDetail+"\n鼠标: 普通转发（未root grab） · 触摸屏: 不抓取";}
+    String status(){return SessionPolicy.NAMES[route]+"\n"+detail+"\n输入: "+(canInput()?"普通转发就绪":"已暂停")+" · 最近投递: "+(delivered?"成功":"未确认")+" · lease关闭丢弃: "+localDrops+"\nexclusive配置: "+(getSharedPreferences("settings",0).getBoolean("exclusive",true)?"开启":"关闭")+" · "+grabDetail+"\n鼠标: Android相对捕获可选（非root grab） · 触摸屏: 不抓取";}
     private void setError(String code){if(stopped)return;connected=false;gate(false);detail=code;changed();}
     private void changed(){if(stopped)return;notifyState();if(display!=null)display.updateStatus();}
     private PendingIntent activity(Class<?> cls,int id){return PendingIntent.getActivity(this,id,new Intent(this,cls).addFlags(Intent.FLAG_ACTIVITY_REORDER_TO_FRONT),PendingIntent.FLAG_IMMUTABLE|PendingIntent.FLAG_UPDATE_CURRENT);}

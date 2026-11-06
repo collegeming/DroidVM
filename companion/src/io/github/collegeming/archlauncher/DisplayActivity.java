@@ -20,6 +20,10 @@ public final class DisplayActivity extends Activity {
     private boolean resumed,displayReady,ime,manualGate;
     private int width=2272,height=1514,buttons;
     private boolean mouseKnown, touchActive;
+    private final PointerCaptureState pointerCapture=new PointerCaptureState();
+    private final PointerMotion pointerMotion=new PointerMotion();
+    private boolean captureSuppressed;
+    private int pointerViewWidth,pointerViewHeight,pointerGuestWidth,pointerGuestHeight;
     private float mouseX,mouseY;
     private SessionService service;
     private final Runnable findSession=new Runnable(){public void run(){
@@ -31,7 +35,9 @@ public final class DisplayActivity extends Activity {
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
         getWindow().setDecorFitsSystemWindows(false);
         area=new FrameLayout(this);area.setBackgroundColor(0xff000000);
-        surface=new SurfaceView(this);surface.setFocusableInTouchMode(true);area.addView(surface,new FrameLayout.LayoutParams(1,1,Gravity.CENTER));
+        surface=new SurfaceView(this){
+            @Override public void onPointerCaptureChange(boolean captured){super.onPointerCaptureChange(captured);captureChanged(captured);}
+        };surface.setFocusableInTouchMode(true);area.addView(surface,new FrameLayout.LayoutParams(1,1,Gravity.CENTER));
         cursor=new SurfaceView(this);cursor.setZOrderMediaOverlay(true);cursor.getHolder().setFormat(android.graphics.PixelFormat.TRANSLUCENT);cursor.setX(-10000);cursor.setY(-10000);area.addView(cursor,new FrameLayout.LayoutParams(64,64));
         status=new TextView(this);status.setTextColor(0xffffffff);status.setBackgroundColor(0xdd202020);status.setTextSize(12);status.setPadding(16,12,16,12);status.setVisibility(View.GONE);
         FrameLayout.LayoutParams statusLayout=new FrameLayout.LayoutParams(-2,-2,Gravity.BOTTOM|Gravity.END);statusLayout.bottomMargin=64;
@@ -55,7 +61,9 @@ public final class DisplayActivity extends Activity {
             MotionEvent copy=MotionEvent.obtain(e.getDownTime(),e.getEventTime(),e.getAction(),props.length,props,coords,e.getMetaState(),e.getButtonState(),e.getXPrecision(),e.getYPrecision(),e.getDeviceId(),e.getEdgeFlags(),e.getSource(),e.getFlags());
             input.sendTouchEvent(copy,EvdevEncoder.NORMALIZED_ABS_MAX/(float)Math.max(1,surface.getWidth()-1),EvdevEncoder.NORMALIZED_ABS_MAX/(float)Math.max(1,surface.getHeight()-1));copy.recycle();if(e.getActionMasked()==MotionEvent.ACTION_UP)touchActive=false;return true;
         });
+        surface.setOnFocusChangeListener((v,focus)->{if(!focus)suspend();refreshGate();});
         surface.setOnGenericMotionListener((v,e)->mouse(e));
+        surface.setOnCapturedPointerListener((v,e)->capturedMouse(e));
         setContentView(area);surface.requestFocus();
         getWindow().getDecorView().post(this::applyFullscreen);
     }
@@ -77,21 +85,84 @@ public final class DisplayActivity extends Activity {
         boolean allowed=SessionPolicy.accepts(resumed,hasWindowFocus(),displayReady,ime,service.inputBlocked());
         if(!allowed){if(input!=null)clearInput();if(!manualGate){manualGate=true;service.gate(false);}}
         else{manualGate=false;service.gate(true);if(service.canInput()&&input==null)input=service.newForwarder();}
+        updatePointerCapture();
     }
-    void clearInput(){chordCycle.reset();if(input!=null){input.close();input=null;}buttons=0;mouseKnown=false;touchActive=false;}
+    void allowPointerCapture(){captureSuppressed=false;}
+    void clearInput(){chordCycle.reset();stopPointerCapture();if(input!=null){input.close();input=null;}buttons=0;mouseKnown=false;touchActive=false;pointerMotion.reset();}
+    private boolean captureEligible(){
+        android.content.SharedPreferences prefs=getSharedPreferences("settings",0);
+        return !captureSuppressed&&prefs.getInt("mode",0)==1&&prefs.getBoolean("pointer_capture",false)
+            &&resumed&&hasWindowFocus()&&displayReady&&!ime&&surface!=null&&surface.isFocused()&&input!=null&&service!=null&&service.canInput();
+    }
+    private void updatePointerCapture(){
+        if(surface==null)return;
+        Object ticket=service==null?null:service.inputLeaseIdentity();
+        int action=pointerCapture.update(ticket,captureEligible());
+        if(action==PointerCaptureState.RELEASE){surface.releasePointerCapture();if(!surface.hasPointerCapture())pointerCapture.changed(false);}
+        else if(action==PointerCaptureState.REQUEST){
+            releasePointerButtons();pointerMotion.reset();mouseKnown=false;
+            surface.requestPointerCapture();
+        }
+    }
+    private void stopPointerCapture(){
+        pointerCapture.update(null,false);
+        if(surface!=null){surface.releasePointerCapture();if(!surface.hasPointerCapture())pointerCapture.changed(false);}
+    }
+    private void captureChanged(boolean captured){
+        if(isFinishing()||isDestroyed()){pointerCapture.update(null,false);if(captured)surface.releasePointerCapture();return;}
+        boolean unexpected=pointerCapture.changed(captured);
+        buttons=0;mouseKnown=false;pointerMotion.reset();
+        if(captured&&(!captureEligible()||!pointerCapture.accepts(service==null?null:service.inputLeaseIdentity()))){stopPointerCapture();return;}
+        if(unexpected){
+            // Release guest buttons even if the platform removes capture without a focus callback.
+            captureSuppressed=true;clearInput();if(service!=null)service.gate(false);
+            main.post(()->{if(resumed)refreshGate();}); // ordinary mode, no automatic capture loop
+        }
+        if(!captured&&!unexpected&&resumed)main.post(this::updatePointerCapture);
+        updateStatus();
+    }
     private void suspend(){clearInput();if(service!=null)service.gate(false);}
     void disconnected(){sourceLifetime.close();clearInput();if(source!=null){source.shutdown();source=null;}displayReady=false;status.setText("已断开；VM继续运行");}
-    void updateStatus(){status.setText(service==null?"请先在设置连接路线":service.status()+"\nSurface: "+(displayReady?"已连接":"等待") );}
+    void updateStatus(){status.setText(service==null?"请先在设置连接路线":service.status()+"\nSurface: "+(displayReady?"已连接":"等待")+" · Pointer capture: "+(surface!=null&&surface.hasPointerCapture()?"实际已捕获":"未捕获") );}
     private void fit(){int w=area.getWidth(),h=area.getHeight();if(w<=0||h<=0)return;if((long)w*height>(long)h*width)w=h*width/height;else h=w*height/width;surface.setLayoutParams(new FrameLayout.LayoutParams(w,h,Gravity.CENTER));}
+    private void pointerButtons(int next){
+        int[] masks={MotionEvent.BUTTON_PRIMARY,MotionEvent.BUTTON_SECONDARY,MotionEvent.BUTTON_TERTIARY};short[] codes={EvdevEncoder.BTN_LEFT,EvdevEncoder.BTN_RIGHT,EvdevEncoder.BTN_MIDDLE};
+        int changed=PointerMotion.buttonChanges(buttons,next);
+        if(input!=null)for(int i=0;i<3;i++)if((changed&masks[i])!=0)input.sendPointerButton(codes[i],(next&masks[i])!=0);
+        buttons=next;
+    }
+    private void releasePointerButtons(){pointerButtons(0);}
+    private void relativeMove(double dx,double dy){
+        int viewW=Math.max(1,surface.getWidth()),viewH=Math.max(1,surface.getHeight());
+        if(pointerViewWidth!=viewW||pointerViewHeight!=viewH||pointerGuestWidth!=width||pointerGuestHeight!=height){pointerMotion.reset();pointerViewWidth=viewW;pointerViewHeight=viewH;pointerGuestWidth=width;pointerGuestHeight=height;}
+        int sensitivity=PointerMotion.sensitivityPercent(getSharedPreferences("settings",0).getInt("mouse_sensitivity",100));
+        int[] move=pointerMotion.move(dx,dy,width,height,viewW,viewH,sensitivity);input.sendMouseMove(move[0],move[1]);
+    }
+    private void wheel(MotionEvent event){int[] scroll=pointerMotion.scroll(event.getAxisValue(MotionEvent.AXIS_VSCROLL),event.getAxisValue(MotionEvent.AXIS_HSCROLL));input.sendScroll(scroll[0],scroll[1]);}
+    private boolean capturedMouse(MotionEvent event){
+        Object ticket=service==null?null:service.inputLeaseIdentity();
+        if(!captureEligible()||!surface.hasPointerCapture()||!pointerCapture.accepts(ticket))return true;
+        if(!event.isFromSource(InputDevice.SOURCE_MOUSE_RELATIVE))return false;
+        if(event.getActionMasked()==MotionEvent.ACTION_CANCEL){suspend();return true;}
+        if(event.getActionMasked()==MotionEvent.ACTION_MOVE||event.getActionMasked()==MotionEvent.ACTION_HOVER_MOVE){
+            float dx=event.getAxisValue(MotionEvent.AXIS_RELATIVE_X),dy=event.getAxisValue(MotionEvent.AXIS_RELATIVE_Y);
+            // Android's standard captured mouse encodes relative deltas in AXIS_X/Y; some drivers expose RELATIVE_X/Y.
+            boolean explicit=false;android.view.InputDevice device=event.getDevice();
+            if(device!=null)explicit=device.getMotionRange(MotionEvent.AXIS_RELATIVE_X,event.getSource())!=null||device.getMotionRange(MotionEvent.AXIS_RELATIVE_Y,event.getSource())!=null;
+            if(!explicit&&dx==0&&dy==0){dx=event.getX();dy=event.getY();}
+            relativeMove(dx,dy);
+        }
+        pointerButtons(event.getButtonState());if(event.getActionMasked()==MotionEvent.ACTION_SCROLL)wheel(event);
+        return true;
+    }
     private boolean mouse(MotionEvent e){
         if(input==null||service==null||!service.canInput()||!e.isFromSource(InputDevice.SOURCE_MOUSE))return false;
+        if(surface.hasPointerCapture())return true; // captured listener is the only sender while actually held
         int mode=getSharedPreferences("settings",0).getInt("mode",0);
         if(mode==2)input.sendAbsMove(Math.round(Math.max(0,Math.min(1,e.getX()/Math.max(1,surface.getWidth()-1)))*EvdevEncoder.NORMALIZED_ABS_MAX),Math.round(Math.max(0,Math.min(1,e.getY()/Math.max(1,surface.getHeight()-1)))*EvdevEncoder.NORMALIZED_ABS_MAX));
-        else if(mouseKnown)input.sendMouseMove(Math.round((e.getX()-mouseX)*width/Math.max(1,surface.getWidth())),Math.round((e.getY()-mouseY)*height/Math.max(1,surface.getHeight())));
+        else if(mouseKnown)relativeMove(e.getX()-mouseX,e.getY()-mouseY);
         mouseX=e.getX();mouseY=e.getY();mouseKnown=true;
-        int next=e.getButtonState();int[] masks={MotionEvent.BUTTON_PRIMARY,MotionEvent.BUTTON_SECONDARY,MotionEvent.BUTTON_TERTIARY};short[] codes={EvdevEncoder.BTN_LEFT,EvdevEncoder.BTN_RIGHT,EvdevEncoder.BTN_MIDDLE};
-        for(int i=0;i<3;i++)if(((buttons^next)&masks[i])!=0)input.sendPointerButton(codes[i],(next&masks[i])!=0);buttons=next;
-        if(e.getActionMasked()==MotionEvent.ACTION_SCROLL)input.sendScroll(Math.round(e.getAxisValue(MotionEvent.AXIS_VSCROLL)),Math.round(e.getAxisValue(MotionEvent.AXIS_HSCROLL)));
+        pointerButtons(e.getButtonState());if(e.getActionMasked()==MotionEvent.ACTION_SCROLL)wheel(e);
         return true;
     }
     public boolean dispatchKeyEvent(KeyEvent e){
