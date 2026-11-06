@@ -20,17 +20,15 @@ public final class SessionService extends Service {
     private OutputStream ownerPipe;
     private String token;
     private int route;
-    private long generation;
-    private long localEpoch;
-    private boolean manual, connected, armed, preparing, starting, stopped;
+    private volatile long generation;
+    private final InputLease lease=new InputLease();
+    private boolean manual, connected, starting, stopped;
     private long launchId;
-    private volatile boolean inputOpen;
-    private volatile long inputEpoch;
     private volatile String detail="未连接";
     private volatile boolean delivered;
     private int lastResult;
     private boolean inputFault;
-    private long forwarderGeneration;
+    private long localDrops;
     private boolean receiverRegistered;
     private DisplayActivity display;
     private final BroadcastReceiver receiver=new BroadcastReceiver(){public void onReceive(Context c,Intent intent){
@@ -55,7 +53,7 @@ public final class SessionService extends Service {
             int requested=SessionPolicy.route(intent.getIntExtra("route",0));
             if(process==null&&!starting) {route=requested;manual=false;startBroker();}
             else if(requested!=route) {detail="切换路线前请先断开；VM不会被关闭";changed();}
-            else {manual=false;inputFault=false;if(broker!=null&&!connected&&!preparing)prepare(false);else if(display!=null)display.refreshGate();changed();}
+            else {manual=false;inputFault=false;if(broker!=null&&!connected&&!lease.pending())prepare(false);else if(display!=null)display.refreshGate();changed();}
         }
         return START_NOT_STICKY;
     }
@@ -76,58 +74,65 @@ public final class SessionService extends Service {
         });
         main.postDelayed(()->{if(!stopped&&launch==launchId&&broker==null)setError("E_ROOT_TIMEOUT");},12000);
     }
+    private void releaseRemote(IInputBroker b,String t,long g){
+        if(b!=null&&g>0)control.execute(()->{try{b.releaseAll(t,g);}catch(Exception ignored){}});
+    }
     private void prepare(boolean enable){
-        final IInputBroker b=broker;final String t=token;final long epoch=++localEpoch;
-        if(b==null)return;
-        generation=0;armed=false;inputOpen=false;preparing=true;forwarderGeneration=0;
+        final IInputBroker b=broker;final String t=token;
+        if(b==null||lease.pending()||stopped)return;
+        final InputLease.Attempt attempt=lease.begin(enable);
         if(display!=null)display.clearInput();
         control.execute(()->{
             try{
                 long next=b.attach(t,SessionPolicy.IDS[route],lifetime);
                 main.post(()->{
-                    if(epoch!=localEpoch){
-                        control.execute(()->{try{b.releaseAll(t,next);}catch(Exception ignored){}});
-                        preparing=false;
-                        if(!stopped){generation=next;connected=true;armed=false;inputOpen=false;detail="管理VM已连接，输入暂停";changed();if(display!=null)display.sessionReady();}
-                        return;
-                    }
-                    preparing=false;generation=next;connected=true;armed=enable;inputEpoch=epoch;inputOpen=enable&&!manual;detail="管理VM已连接";changed();
+                    if(stopped||broker!=b){lease.fail(attempt);releaseRemote(b,t,next);return;}
+                    if(!lease.complete(attempt,next)){releaseRemote(b,t,next);return;}
+                    generation=next;connected=true;
+                    if(!lease.current(lease.ticket()))releaseRemote(b,t,next);
+                    detail=canInput()?"管理VM已连接":"管理VM已连接，输入暂停";changed();
                     if(display!=null)display.sessionReady();
                 });
-            }catch(Exception ignored){main.post(()->{if(epoch==localEpoch)setError("E_VM_NOT_READY（请由管理端启动此路线）");});}
+            }catch(Exception ignored){main.post(()->{if(lease.fail(attempt)&&!stopped)setError("E_VM_NOT_READY（请由管理端启动此路线）");});}
         });
     }
-    void attachDisplay(DisplayActivity activity){display=activity;if(connected)activity.sessionReady();changed();}
+    void attachDisplay(DisplayActivity activity){if(display!=activity){gate(false);display=activity;}if(connected)activity.sessionReady();changed();}
     void removeDisplay(DisplayActivity activity){if(display==activity){gate(false);display=null;}}
-    boolean canInput(){return connected&&armed&&!manual&&!inputFault&&generation>0;}
+    boolean canInput(){return connected&&!inputBlocked()&&lease.current(lease.ticket());}
     boolean inputBlocked(){return manual||inputFault;}
     boolean isConnected(){return connected;}
     boolean isManual(){return manual;}
     int route(){return route;}
     void gate(boolean allowed){
-        if(!allowed){
-            ++localEpoch;inputOpen=false;armed=false;
-            IInputBroker b=broker;String t=token;long g=generation;
-            if(b!=null&&g>0)control.execute(()->{try{b.releaseAll(t,g);}catch(Exception ignored){}});
+        if(!allowed||inputBlocked()){
+            lease.close();
             if(display!=null)display.clearInput();
+            releaseRemote(broker,token,generation);
             changed();
-        }else if(!inputBlocked()&&connected&&!armed&&!preparing&&broker!=null)prepare(true);
+        }else{
+            lease.want(true);
+            if(connected&&!canInput()&&!lease.pending()&&broker!=null)prepare(true);
+        }
     }
     android.os.IBinder displayBinder(){
         IInputBroker b=broker;String t=token;long g=generation;
         try{return b==null?null:b.display(t,g);}catch(Exception ignored){return null;}
     }
     InputForwarder newForwarder(){
-        final IInputBroker b=broker;final String t=token;final long g=generation,epoch=localEpoch;
-        forwarderGeneration=g;
+        final IInputBroker b=broker;final String t=token;final InputLease.Ticket ticket=lease.ticket();
+        if(!lease.current(ticket))return null;
+        final long g=ticket.generation;
+        final java.util.concurrent.atomic.AtomicBoolean cleanupQueued=new java.util.concurrent.atomic.AtomicBoolean();
         InputForwarder forwarder=new InputForwarder((channel,bytes)->{
-            if(!inputOpen||epoch!=inputEpoch)return false;
+            if(!lease.current(ticket)){main.post(()->{localDrops++;});return false;}
             int result;try{result=b.write(t,g,channel,bytes);}catch(Exception ignored){result=BrokerGate.IPC_ERROR;}
             final int outcome=result;
-            boolean ok=result==BrokerGate.DELIVERED;delivered=ok;
+            boolean ok=result==BrokerGate.DELIVERED;
+            // close may race a blocking write; enqueue cleanup of this exact generation after it.
+            if(!lease.current(ticket)){if(cleanupQueued.compareAndSet(false,true))releaseRemote(b,t,g);return false;}
             main.post(()->{
-                if(epoch!=localEpoch||g!=generation)return;
-                lastResult=outcome;
+                if(!lease.current(ticket))return;
+                delivered=outcome==BrokerGate.DELIVERED;lastResult=outcome;
                 if(outcome!=BrokerGate.DELIVERED){
                     // A stale worker is not an escape key or a user-requested manual release.
                     inputFault=outcome!=BrokerGate.STALE;
@@ -144,7 +149,7 @@ public final class SessionService extends Service {
         return forwarder;
     }
     String status(){return SessionPolicy.NAMES[route]+"\n"+detail+"\n输入: "+(canInput()?"普通转发就绪":"已暂停")+" · 最近投递: "+(delivered?"成功":"未确认")+"\nexclusive配置: "+(getSharedPreferences("settings",0).getBoolean("exclusive",true)?"开启":"关闭")+" · 实际held: 否（grab未完成）";}
-    private void setError(String code){if(stopped)return;preparing=false;connected=false;gate(false);detail=code;changed();}
+    private void setError(String code){if(stopped)return;connected=false;gate(false);detail=code;changed();}
     private void changed(){if(stopped)return;notifyState();if(display!=null)display.updateStatus();}
     private PendingIntent activity(Class<?> cls,int id){return PendingIntent.getActivity(this,id,new Intent(this,cls).addFlags(Intent.FLAG_ACTIVITY_REORDER_TO_FRONT),PendingIntent.FLAG_IMMUTABLE|PendingIntent.FLAG_UPDATE_CURRENT);}
     private PendingIntent action(String action,int id){return PendingIntent.getService(this,id,new Intent(this,SessionService.class).setAction(action),PendingIntent.FLAG_IMMUTABLE|PendingIntent.FLAG_UPDATE_CURRENT);}

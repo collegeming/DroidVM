@@ -13,17 +13,21 @@ assert 'if(!decor.isAttachedToWindow())return;' in fullscreen
 assert 'if(ctl!=null)' in fullscreen
 assert 'post(' not in fullscreen and 'postDelayed' not in fullscreen
 broker = (source/'InputBroker.java').read_text(encoding='utf-8')
-assert 'if(!valid(captured))return;' in broker
+assert 'if(!gate.current(expected))return;' in broker
+assert 'synchronized' not in broker
+assert 'MonotonicDeadline budget=new MonotonicDeadline(RELEASE_MS)' in broker
+assert 'if(!sourceLifetime.current(sourceId)||service!=captured)return;' in activity
 assert 'int state=gate.status(session);if(state!=0)return state;' in broker
 assert 'for(int slot:touchSlots)' in broker
 assert 'slot<32' not in broker
 assert 'status.setVisibility(View.GONE)' in activity
-assert 'if(releaseFailed)throw' in broker
+assert 'if(releaseFailed)return 0L;' in broker
 assert '.getMethod("checkService",String.class)' in broker
 assert not any(cmd in broker for cmd in ['"vm_stop"','"vm_kill"','"vm_create"','"vm_start"'])
 service = (source/'SessionService.java').read_text(encoding='utf-8')
 assert '"su","-M","-c"' in service
-assert 'if(!inputOpen||epoch!=inputEpoch)return false;' in service
+assert 'if(!lease.current(ticket))' in service
+assert 'cleanupQueued.compareAndSet(false,true))releaseRemote(b,t,g);return false;' in service
 assert 'ownerPipe.close()' in service
 assert 'CLASSPATH=' in service
 provider = (source/'DisplayProvider.java').read_text(encoding='utf-8')
