@@ -1,0 +1,31 @@
+{
+  "schema": 1,
+  "guard": "--droidvm-profile-guard=v1",
+  "shared_launcher": "/data/data/cn.classfun.droidvm/usr/bin/crosvm",
+  "known_replaced_launchers": ["525300ff2f0713714ee9f5052f18174b35dee95ebed1fb5eea941ec7e4a83ffb", "cd3693ba876720f7ab7c08e5d6358101336f3bbcdb3d7d4f324ac29274bf6a7b"],
+  "stock": {"path": "/data/data/cn.classfun.droidvm/usr/bin/crosvm.orig.bak-stock-579d1a5b", "sha256": "cd3693ba876720f7ab7c08e5d6358101336f3bbcdb3d7d4f324ac29274bf6a7b"},
+  "profiles": [
+    {
+      "id": "gfxstream-v1", "uuid": "d570d1fd-afcf-407d-a82c-fccadc203cf1", "display_name": "Arch Linux · gfxstream",
+      "disk": {"path": "/storage/emulated/0/DroidVM/VMs/Arch-gfxstream/arch.img", "dev": 212, "ino": 522665, "format": "raw", "backing": null},
+      "kernel": {"path": "/storage/emulated/0/DroidVM/VMs/Arch-gfxstream/boot/Image", "sha256": "702e455882208eae8818bc058a37ed04e12fb9db14d86310be3124c857e919ae"},
+      "initrd": {"path": "/storage/emulated/0/DroidVM/VMs/Arch-gfxstream/boot/initramfs.img", "sha256": "cab36f21d8b2b166e10c5892b1c00d1a010ef2e3c7346c39c6d9d3aed26d7497"},
+      "runtime": {"path": "/data/data/cn.classfun.droidvm/usr/bin/crosvm.orig", "sha256": "6a952ad1256da68246a0b8230c457ac5266aba62d9362b58fbfc5003b7faa514"},
+      "libraries": [{"path": "/data/local/tmp/droidvm-native-pair-v1/lib/libgfxstream_backend.so", "sha256": "1b2969807c20f0bbcce1440f56c8bf29d7b60c50cf40cd1dc2b28e76abf086ed"}],
+      "library_path": "/data/local/tmp/droidvm-native-pair-v1/lib:/data/data/cn.classfun.droidvm/usr/lib:/system/lib64",
+      "environment": {"ANDROID_EMU_VK_LOADER_PATH": "/system/lib64/libvulkan.so", "GFXSTREAM_EXTERNAL_MEMORY_MODE": "AndroidAHB", "GFXSTREAM_AHB_FIRST": "0", "GFXSTREAM_UDMABUF_ALLOW_ANY_KERNEL": "1", "GFXSTREAM_RENDERER_FEATURES": "ExternalBlob:enabled,SystemBlob:enabled,VulkanAllocateHostVisibleAsUdmabuf:disabled,VulkanAllocateHostMemory:disabled,VirtioGpuNext:enabled,ClassicImageBridge:enabled", "GFXSTREAM_GUNYAH_PIN_RINGBLOB": "1", "GFXSTREAM_NIRI_IMAGE_TRACE": "1", "GPU_DISPLAY_COPY_MODE": "cpu", "GFXSTREAM_CIB_DUMP_REQUEST": "/data/local/tmp/cib-dump-req", "GFXSTREAM_HOSTPTR_PRESUBMIT_CLEAN": "buffers", "CROSVM_FATAL_BACKTRACE": "1", "CROSVM_FATAL_MAPS_PATH": "/data/data/cn.classfun.droidvm/files/crosvm-maps.txt", "GPU_GFXSTREAM_NO_2D_FALLBACK": "1", "CROSVM_ALLOW_FIXED_BLOB_WITH_VULKANO": "1"}, "enabled": false,
+      "blocked_by": ["stock guard rejection evidence", "complete dynamic dependency inventory"]
+    },
+    {
+      "id": "panvk-v1", "uuid": "ecb0505e-718b-49a2-b284-de72d735fde1", "display_name": "Arch Linux · PanVK",
+      "disk": {"path": "/storage/emulated/0/DroidVM/VMs/Arch-PanVK/root.qcow2", "dev": 212, "ino": 527919, "format": "qcow2", "backing": null},
+      "kernel": {"path": "/storage/emulated/0/DroidVM/VMs/Arch-PanVK/boot/Image", "sha256": "80af1fe7be83a08d5392b83383342cf32b1f278f6d8675d75dc4617b047a09b9"},
+      "initrd": {"path": "/storage/emulated/0/DroidVM/VMs/Arch-PanVK/boot/initramfs.img", "sha256": "7d7aafd8a62066c090b4fcd84191c11f8eea72f4efdb8713328bfd4123b144d5"},
+      "runtime": {"path": "/data/local/tmp/panvk-stability-v1/bin/crosvm-native-alpha", "sha256": "c7abb915fb1404feefd208ceb18e5b0069c18a71867dbe4a1fb5eda5e82c13e7"},
+      "libraries": [{"path": "/data/local/tmp/panvk-stability-v1/lib/libvirglrenderer.so", "sha256": "22e1c7df223edcd10b374f419ff50149fa24e846ae7bfc5be18c66634db7c51c"}],
+      "library_path": "/data/local/tmp/panvk-stability-v1/lib:/data/data/cn.classfun.droidvm/usr/lib:/system/lib64",
+      "environment": {"PANVK_PRESENT_PROFILE": "1", "GPU_DISPLAY_COPY_MODE": "cpu", "VKR_TEST_KBASE_NATIVE": "1", "VKR_TEST_KBASE_MAX_BO": "1024", "VKR_TEST_KBASE_MAX_MB": "1024", "RUST_LOG": "info"},
+      "enabled": false, "blocked_by": ["stock guard rejection evidence", "complete dynamic dependency inventory"]
+    }
+  ]
+}
