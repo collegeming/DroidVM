@@ -27,10 +27,10 @@ jobs:
         run: timeout 60s python3 -I app/src/test/python/test_native_input_listener.py
       - uses: android-actions/setup-android@v3
         with:
-          packages: 'platforms;android-37'
+          packages: 'platforms;android-36'
       - name: Compile actual bridge with Android SDK and declared dependency stubs
         run: |
-          python3 -I scripts/ci/compile_native_input_bridge.py "$ANDROID_HOME/platforms/android-37/android.jar" out/native-input-compile
+          python3 -I scripts/ci/compile_native_input_bridge.py "$ANDROID_HOME/platforms/android-36/android.jar" out/native-input-compile
       - name: State validation scope
         run: |
           printf '%s\n' 'Production owner tests and Linux poll/HUP semantics only. Bridge SDK compilation uses dependency stubs; not full APK/JNI/device validation. Not proof of fdsan crash root cause or repair.'
