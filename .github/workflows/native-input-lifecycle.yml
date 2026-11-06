@@ -3,7 +3,7 @@ on:
   workflow_dispatch:
   push:
     branches: [native-input-fd-ownership]
-    paths: ['app/src/main/java/cn/classfun/droidvm/daemon/vm/backend/Native*', 'app/src/main/java/cn/classfun/droidvm/daemon/vm/SerialPipe*', 'app/src/test/**', 'scripts/ci/compile_native_input_bridge.py', '.github/workflows/native-input-lifecycle.yml']
+    paths: ['app/src/main/java/cn/classfun/droidvm/daemon/vm/backend/Native*', 'app/src/main/java/cn/classfun/droidvm/daemon/vm/SerialPipe*', 'app/src/test/**', 'scripts/ci/compile_native_input_bridge.py', 'scripts/ci/test_serial_pipe_regression.py', '.github/workflows/native-input-lifecycle.yml']
 permissions:
   contents: read
 jobs:
@@ -12,6 +12,8 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
@@ -30,6 +32,8 @@ jobs:
             app/src/main/java/cn/classfun/droidvm/daemon/vm/SerialPipeFds.java \
             app/src/test/java/cn/classfun/droidvm/daemon/vm/SerialPipeFdsTest.java
           timeout 60s java -cp out/serial-pipe-tests cn.classfun.droidvm.daemon.vm.SerialPipeFdsTest
+      - name: Regress actual SerialPipe against historical adoption and FD reuse failure
+        run: python3 -I scripts/ci/test_serial_pipe_regression.py
       - name: Test Linux listener wake and source lifecycle contracts
         run: timeout 60s python3 -I app/src/test/python/test_native_input_listener.py
       - uses: android-actions/setup-android@v3
