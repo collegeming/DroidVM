@@ -48,7 +48,42 @@ def check_capture_resume():
     print('Capture resume contracts: explicit permission boundaries and read-only boolean capture diagnostics passed')
 
 
+def check_surface_focus():
+    ready = activity[activity.index('    void sessionReady()'):activity.index('    void refreshGate()')]
+    assert ready.index('surfaceFocusPending=true;') < ready.index('source=new NativeSurfaceSource')
+    callback = ready[ready.index('public void onStateChanged('):]
+    assert callback.index('if(!sourceLifetime.current(sourceId)||service!=captured)return;') < callback.index('surfaceFocusPending=true;')
+    assert 'if(displayReady&&!ready)surfaceFocusPending=true;' in callback
+    assert activity.count('surfaceFocusPending=true;') == 2  # only new source and connected -> not-ready
+    refresh = activity[activity.index('    void refreshGate()'):activity.index('    private void restoreSurfaceFocus()')]
+    assert refresh.index('input=service.newForwarder();') < refresh.index('restoreSurfaceFocus();') < refresh.index('updatePointerCapture();')
+    restore = activity[activity.index('    private void restoreSurfaceFocus()'):activity.index('    void allowPointerCapture()')]
+    for guard in ('!surfaceFocusPending', 'captureSuppressed', 'isFinishing()', 'isDestroyed()',
+                  'SessionPolicy.accepts(resumed,hasWindowFocus(),displayReady,ime,service.inputBlocked())',
+                  '!service.canInput()', 'input==null', 'surface==null', '!surface.isAttachedToWindow()'):
+        assert guard in restore
+    assert restore.index('surfaceFocusPending=false;') < restore.index('surface.requestFocus();')
+    assert 'if(!surface.isFocused())surface.requestFocus();' in restore
+    assert 'post(' not in restore and 'postDelayed(' not in restore
+    assert activity.count('restoreSurfaceFocus();') == 1
+    assert activity.count('surface.requestFocus();') == 2  # initial create and one-shot repair only
+    assert 'surface.setOnFocusChangeListener((v,focus)->{if(!focus)suspend();refreshGate();});' in activity
+    assert 'private void suspend(){clearInput();if(service!=null)service.gate(false);}' in activity
+    gate = service[service.index('    void gate(boolean allowed)'):service.index('    android.os.IBinder displayBinder()')]
+    assert 'lease.close();' in gate and 'display.clearInput();' in gate
+    assert 'if(connected&&!canInput()&&!lease.pending()&&broker!=null)prepare(true);' in gate
+    # A synchronous focus callback may re-enter refreshGate, but cannot re-arm the focus attempt.
+    assert 'surfaceFocusPending=true;' not in refresh and 'surfaceFocusPending=true;' not in restore
+    poll = activity[activity.index('    private final Runnable findSession='):activity.index('    public void onCreate(')]
+    assert 'requestFocus' not in poll and 'restoreSurfaceFocus' not in poll
+    disconnected = activity[activity.index('    void disconnected()'):activity.index('    void updateStatus()')]
+    assert 'sourceLifetime.close();surfaceFocusPending=false;' in disconnected
+    assert 'focusPending=' in activity
+    print('Surface focus contracts: source/recreation-only one-shot repair, foreground/input/suppression guards and no polling retry passed')
+
+
 check_capture_resume()
+check_surface_focus()
 if '--capture-resume-only' in sys.argv[2:]:
     sys.exit(0)
 create = activity[activity.index('public void onCreate('):activity.index('    void sessionReady()')]
