@@ -24,7 +24,8 @@ final class StartPolicy {
         }
         return profiles==1&&guards==1;
     }
-    static boolean knownDispatcher(String digest){return DISPATCHER_SHA.equals(digest);}
+    static final String DURABLE_DISPATCHER_SHA="02a90a480895e7324d41679ef226063c137f573058ba6e2019e5374b89922ec0";
+    static boolean knownDispatcher(String digest){return DISPATCHER_SHA.equals(digest)||DURABLE_DISPATCHER_SHA.equals(digest);}
     static boolean mayStart(String state){return "stopped".equals(state);}
     static boolean attachOnly(String state){return "running".equals(state);}
 }
