@@ -27,6 +27,7 @@ public final class InputBroker {
     private int touchSlot;
     private String vm;
     private boolean releaseFailed;
+    private int sendResult=BrokerGate.NOT_DELIVERED;
     private IBinder client;
     private IBinder.DeathRecipient death;
     private final int uid;
@@ -45,9 +46,14 @@ public final class InputBroker {
     }
     private void queue(Runnable work){try{io.execute(work);}catch(RejectedExecutionException ignored){}}
     private boolean send(int channel,byte[] bytes,MonotonicDeadline budget){
+        sendResult=BrokerGate.IPC_ERROR;
         if(budget.millis()==0)return false;
-        try{return daemon.request("vm_input",new JSONObject().put("vm_id",vm).put("screen","gpu-0").put("channel",channel)
-            .put("data",Base64.encodeToString(bytes,Base64.NO_WRAP)),budget).optBoolean("delivered");}catch(Exception ignored){return false;}
+        try{
+            JSONObject response=daemon.request("vm_input",new JSONObject().put("vm_id",vm).put("screen","gpu-0").put("channel",channel)
+                .put("data",Base64.encodeToString(bytes,Base64.NO_WRAP)),budget);
+            if(!response.has("delivered")){sendResult=BrokerGate.ACK_MISSING;return false;}
+            boolean ok=response.getBoolean("delivered");sendResult=ok?BrokerGate.DELIVERED:BrokerGate.NOT_DELIVERED;return ok;
+        }catch(RpcFailure failure){sendResult=(int)failure.code;return false;}catch(Exception ignored){return false;}
     }
     private static void record(ByteArrayOutputStream out,int type,int code,int value){byte[] bytes=ByteBuffer.allocate(8).order(ByteOrder.LITTLE_ENDIAN).putShort((short)type).putShort((short)code).putInt(value).array();out.write(bytes,0,bytes.length);}
     private void release(MonotonicDeadline budget){
@@ -95,9 +101,9 @@ public final class InputBroker {
         }
         dirty[channel]=true;
         if(!send(channel,bytes,budget)){
-            gate.pause(session,BrokerGate.NOT_DELIVERED);revoked.add(session);
-            // Network budget already consumed: cleanup gets its own bounded queue job, not this call.
-            MonotonicDeadline cleanup=new MonotonicDeadline(RELEASE_MS);queue(()->{if(gate.current(session))release(cleanup);});return BrokerGate.NOT_DELIVERED;
+            int failure=sendResult;gate.pause(session,failure);revoked.add(session);
+            // Preserve the original ACK/transport cause before cleanup attempts another send.
+            MonotonicDeadline cleanup=new MonotonicDeadline(RELEASE_MS);queue(()->{if(gate.current(session))release(cleanup);});return failure;
         }
         data.rewind();while(data.remaining()>=8){
             int type=data.getShort()&65535,code=data.getShort()&65535,value=data.getInt();
@@ -109,7 +115,7 @@ public final class InputBroker {
     }
     private static String[] strings(org.json.JSONArray array)throws Exception{String[] out=new String[array.length()];for(int i=0;i<out.length;i++)out[i]=array.getString(i);return out;}
     private boolean configured(String target,MonotonicDeadline budget)throws Exception{
-        JSONObject config=daemon.request("vm_get",new JSONObject().put("vm_id",target),budget).getJSONObject("data");
+        JSONObject config=daemon.request("vm_get",new JSONObject().put("vm_id",target),budget,5000).getJSONObject("data");
         JSONObject screen=config.getJSONObject("screens").getJSONObject("gpu-0");
         return target.equals(config.getString("id"))&&"CROSVM".equals(config.getString("backend"))&&screen.optBoolean("enabled")&&screen.optBoolean("input_enabled")&&"native".equals(screen.optString("exporter"))
             &&StartPolicy.configured(target,strings(config.getJSONArray("environment_variables")),strings(config.getJSONArray("extra_options")));
@@ -126,7 +132,7 @@ public final class InputBroker {
         public long attach(String supplied,String target,IBinder lifetime,boolean allowStart){
             check(supplied);if(!SessionPolicy.allowed(target)||lifetime==null)throw new SecurityException("target denied");
             attachedOnce=true; // startup may exceed the binder-announcement timeout; client pipe owns it
-            MonotonicDeadline budget=new MonotonicDeadline(allowStart?35000:5000);
+            MonotonicDeadline budget=new MonotonicDeadline(allowStart?45000:12000);
             return call(budget,()->{
                 if(budget.millis()==0)return ManagedStart.START_TIMEOUT;
                 MonotonicDeadline cleanup=new MonotonicDeadline(Math.min(RELEASE_MS,budget.millis()));
@@ -135,9 +141,9 @@ public final class InputBroker {
                 long ready=ManagedStart.ensure(new ManagedStart.Host(){
                     public boolean configured()throws Exception{if(closing)throw new IOException();return InputBroker.this.configured(target,budget);}
                     public String dispatcherHash()throws Exception{return InputBroker.dispatcherHash();}
-                    public void ping()throws Exception{daemon.request("ping",new JSONObject(),budget);}
-                    public String state()throws Exception{if(closing)throw new IOException();return daemon.request("vm_status",new JSONObject().put("vm_id",target),budget).getString("state");}
-                    public void start()throws Exception{if(closing)throw new IOException();daemon.request("vm_start",new JSONObject().put("vm_id",target),budget);}
+                    public void ping()throws Exception{daemon.request("ping",new JSONObject(),budget,5000);}
+                    public String state()throws Exception{if(closing)throw new IOException();return daemon.request("vm_status",new JSONObject().put("vm_id",target),budget,5000).getString("state");}
+                    public void start()throws Exception{if(closing)throw new IOException();daemon.request("vm_start",new JSONObject().put("vm_id",target),budget,20000);}
                     public void sleep()throws Exception{Thread.sleep(Math.min(250,budget.millis()));}
                 },allowStart,budget);
                 if(ready<0)return ready;
