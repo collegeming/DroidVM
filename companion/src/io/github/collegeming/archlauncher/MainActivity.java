@@ -50,9 +50,12 @@ public final class MainActivity extends Activity {
         open.setEnabled(false);
         status.setText("\u6b63\u5728\u68c0\u67e5 root\u3001runtime \u548c daemon\u2026");
         new Thread(() -> {
+            // Only these source-defined labels reach the UI; never an exception/server string.
+            String stage = "ROOT";
             try {
                 if (!root("id -u").trim().equals("0"))
                     throw new Exception("\u672a\u83b7\u5f97 root \u6388\u6743\u3002");
+                stage = "HASH_MANIFEST";
                 JSONObject manifest;
                 try (InputStream in = getAssets().open("runtime-manifest.json")) {
                     manifest = new JSONObject(new String(in.readAllBytes(), StandardCharsets.UTF_8));
@@ -70,22 +73,29 @@ public final class MainActivity extends Activity {
                         .append("' | cut -d ' ' -f 1)\" = '").append(hash).append("'\n");
                 }
                 check.append("printf verified");
+                stage = "HASH";
                 if (!root(check.toString()).equals("verified"))
                     throw new Exception("runtime \u6821\u9a8c\u672a\u901a\u8fc7\uff0c\u8bf7\u5148\u5b8c\u6210\u53d7\u63a7\u90e8\u7f72\u3002");
                 // Read credentials only into memory; never include them in a command, log or UI.
+                stage = "AUTH_CONFIG";
                 String config = root(String.format(java.util.Locale.ROOT,
                     "cat %srun/droidvmd-port.txt; printf '\\n'; cat %srun/droidvmd-token.txt",
                     BASE, BASE)).trim();
                 String[] values = config.split("\\s+", 2);
                 if (values.length != 2) throw new Exception("daemon \u672a\u51c6\u5907\u597d\uff0c\u8bf7\u5148\u5b8c\u6210\u53d7\u63a7\u542f\u52a8\u3002");
                 int port = Integer.parseInt(values[0]);
+                stage = "CONNECT";
                 try (Socket socket = new Socket()) {
                     socket.connect(new InetSocketAddress("127.0.0.1", port), 4000);
                     socket.setSoTimeout(5000);
+                    stage = "AUTH";
                     request(socket, "auth", new JSONObject().put("token", values[1]));
+                    stage = "PING";
                     request(socket, "ping", new JSONObject());
+                    stage = "VM_GET";
                     JSONObject target = request(socket, "vm_get", new JSONObject().put("vm_id", VM))
                         .getJSONObject("data");
+                    stage = "VM_CONFIG";
                     JSONObject screen = target.getJSONObject("screens").getJSONObject("gpu-0");
                     if (!VM.equals(target.optString("id"))
                         || !"arch-niri-mali".equals(target.optString("name"))
@@ -95,24 +105,31 @@ public final class MainActivity extends Activity {
                         || !screen.optBoolean("enabled") || !screen.optBoolean("input_enabled")
                         || screen.optInt("width") != 2272 || screen.optInt("height") != 1514
                         || !usesArchDisk(target)) throw new Exception("unexpected VM configuration");
+                    stage = "VM_STATUS";
                     String state = request(socket, "vm_status", new JSONObject().put("vm_id", VM))
                         .getString("state");
                     if (!"running".equals(state) && !"stopped".equals(state))
                         throw new Exception("VM transition in progress");
                     // Read-only preflight, not a lock against another client starting a VM later.
                     // Treat every non-stopped peer as potentially owning the shared disk.
+                    stage = "VM_LIST";
                     var peers = request(socket, "vm_list", new JSONObject()).getJSONArray("data");
                     for (int i = 0; i < peers.length(); i++) {
+                        stage = "VM_LIST";
                         String peer = peers.getJSONObject(i).getString("id");
                         if (VM.equals(peer)) continue;
+                        stage = "VM_PEER_STATUS";
                         String peerState = request(socket, "vm_status", new JSONObject().put("vm_id", peer))
                             .getString("state");
                         if ("stopped".equals(peerState)) continue;
+                        stage = "VM_PEER_CONFIG";
                         JSONObject configPeer = request(socket, "vm_get", new JSONObject().put("vm_id", peer))
                             .getJSONObject("data");
+                        stage = "VM_DISK";
                         if (usesArchDisk(configPeer)) throw new Exception("shared disk busy");
                     }
                 }
+                stage = "ACTIVITY";
                 String activityResult = root(String.format(java.util.Locale.ROOT,
                     "am start -W --activity-single-top --activity-reorder-to-front -n cn.classfun.droidvm/.ui.vm.display.nativedisplay.display.VMNativeDisplayActivity --es vm_id %s --es vm_name arch-niri-mali --es screen gpu-0 --ez input_enabled true --el display_width 2272 --el display_height 1514", VM));
                 String amResult = activityResult.toLowerCase(java.util.Locale.ROOT);
@@ -125,9 +142,11 @@ public final class MainActivity extends Activity {
                 });
             } catch (Exception error) {
                 // Do not surface command stdout/stderr, server messages or exception text: they
-                // can include credentials or app-private state. Fail closed with fixed guidance.
+                // can include credentials or app-private state. Fail closed with a fixed stage.
+                final String failedStage = stage;
                 runOnUiThread(() -> {
-                    status.setText("\u672a\u542f\u52a8\uff1a\u8bf7\u68c0\u67e5 root \u6388\u6743\u3001\u5339\u914d\u7684 runtime \u548c\u5df2\u8fd0\u884c\u7684\u5065\u5eb7 daemon\u3002\u542f\u52a8\u5668\u4e0d\u4f1a\u6062\u590d\u6587\u4ef6\u6216\u51b7\u542f\u52a8 stock runtime\u3002");
+                    status.setText(String.format(java.util.Locale.ROOT,
+                        "\u672a\u5b8c\u6210 [E_%s]\u3002\u8bf7\u5c06\u6b64\u9636\u6bb5\u7801\u63d0\u4f9b\u7ed9\u6392\u67e5\u4eba\u5458\u3002\u4e0d\u4f1a\u6062\u590d runtime \u6216\u51b7\u542f\u52a8 daemon\u3002", failedStage));
                     open.setEnabled(true);
                 });
             }
