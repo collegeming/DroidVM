@@ -48,6 +48,7 @@ public class SettingsActivity extends Activity {
         else if(recorder.error!=null)recordNote.setText(recorder.error);
         return true;
     }
+    public void onWindowFocusChanged(boolean focus){super.onWindowFocusChanged(focus);if(!focus&&recording){recording=false;recorder.reset();recordNote.setText("录入因失焦已取消，原组合不变。");}}
     protected void onResume(){super.onResume();main.post(poll);}
     protected void onPause(){recording=false;recorder.reset();main.removeCallbacks(poll);super.onPause();}
 }
