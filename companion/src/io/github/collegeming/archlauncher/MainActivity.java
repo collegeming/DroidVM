@@ -83,11 +83,42 @@ public final class MainActivity extends Activity {
                     socket.setSoTimeout(5000);
                     request(socket, "auth", new JSONObject().put("token", values[1]));
                     request(socket, "ping", new JSONObject());
-                    request(socket, "vm_get", new JSONObject().put("vm_id", VM));
+                    JSONObject target = request(socket, "vm_get", new JSONObject().put("vm_id", VM))
+                        .getJSONObject("data");
+                    JSONObject screen = target.getJSONObject("screens").getJSONObject("gpu-0");
+                    if (!VM.equals(target.optString("id"))
+                        || !"arch-niri-mali".equals(target.optString("name"))
+                        || !"CROSVM".equals(target.optString("backend"))
+                        || !"GPU_GFXSTREAM".equals(target.optString("gpu_backend"))
+                        || !"native".equals(screen.optString("exporter"))
+                        || !screen.optBoolean("enabled") || !screen.optBoolean("input_enabled")
+                        || screen.optInt("width") != 2272 || screen.optInt("height") != 1514
+                        || !usesArchDisk(target)) throw new Exception("unexpected VM configuration");
+                    String state = request(socket, "vm_status", new JSONObject().put("vm_id", VM))
+                        .getString("state");
+                    if (!"running".equals(state) && !"stopped".equals(state))
+                        throw new Exception("VM transition in progress");
+                    // Read-only preflight, not a lock against another client starting a VM later.
+                    // Treat every non-stopped peer as potentially owning the shared disk.
+                    var peers = request(socket, "vm_list", new JSONObject()).getJSONArray("data");
+                    for (int i = 0; i < peers.length(); i++) {
+                        String peer = peers.getJSONObject(i).getString("id");
+                        if (VM.equals(peer)) continue;
+                        String peerState = request(socket, "vm_status", new JSONObject().put("vm_id", peer))
+                            .getString("state");
+                        if ("stopped".equals(peerState)) continue;
+                        JSONObject configPeer = request(socket, "vm_get", new JSONObject().put("vm_id", peer))
+                            .getJSONObject("data");
+                        if (usesArchDisk(configPeer)) throw new Exception("shared disk busy");
+                    }
                 }
-                root("am start -W --activity-single-top --activity-reorder-to-front -n cn.classfun.droidvm/.ui.vm.display.nativedisplay.display.VMNativeDisplayActivity"
+                String activityResult = root("am start -W --activity-single-top --activity-reorder-to-front -n cn.classfun.droidvm/.ui.vm.display.nativedisplay.display.VMNativeDisplayActivity"
                     + " --es vm_id " + VM + " --es vm_name arch-niri-mali --es screen gpu-0"
                     + " --ez input_enabled true --el display_width 2272 --el display_height 1514");
+                String amResult = activityResult.toLowerCase(java.util.Locale.ROOT);
+                if (amResult.contains("error") || amResult.contains("exception")
+                    || !amResult.matches("(?s).*status:\\s*ok\\b.*"))
+                    throw new Exception("Activity launch failed");
                 runOnUiThread(() -> {
                     status.setText("已打开原生显示，请点击其全屏按钮。Ctrl+Alt+F12 退出独占需要 daemon 已配置逃生键。");
                     open.setEnabled(true);
@@ -101,6 +132,16 @@ public final class MainActivity extends Activity {
                 });
             }
         }, "arch-launch-check").start();
+    }
+
+    private static boolean usesArchDisk(JSONObject config) throws Exception {
+        var disks = config.getJSONArray("disks");
+        for (int i = 0; i < disks.length(); i++) {
+            String path = disks.getJSONObject(i).getString("path");
+            if (path.equals(BASE + "files/arch.img")
+                || path.equals("/data/user/0/cn.classfun.droidvm/files/arch.img")) return true;
+        }
+        return false;
     }
 
     private static String root(String command) throws Exception {

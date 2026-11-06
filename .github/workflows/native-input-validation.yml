@@ -19,6 +19,8 @@ jobs:
           distribution: temurin
           java-version: '21'
       - uses: android-actions/setup-android@v3
+        with:
+          packages: 'build-tools;36.0.0'
       - uses: gradle/actions/setup-gradle@v4
       - name: Test and compile input changes (not an upgrade of upstream APK)
         run: chmod +x gradlew && ./gradlew testDebugUnitTest assembleDebug
