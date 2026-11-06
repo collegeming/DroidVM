@@ -1,0 +1,71 @@
+name: Unified companion
+on:
+  workflow_dispatch:
+  push:
+    branches: [unified-companion-v1]
+    paths: ['companion/**', '.github/workflows/unified-companion.yml']
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with:
+          repository: collegeming/DroidVM
+          ref: 37d7227a3268ca70f72f297bb6524d50621b19d7
+          path: fixed-source
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - uses: android-actions/setup-android@v3
+        with:
+          packages: 'platforms;android-36 build-tools;36.0.0'
+      - name: Test session policy and assemble fixed DroidVM sources
+        run: |
+          mkdir -p out/tests
+          javac --release 11 -d out/tests companion/src/io/github/collegeming/archlauncher/SessionPolicy.java companion/test/io/github/collegeming/archlauncher/SessionPolicyTest.java
+          java -cp out/tests io.github.collegeming.archlauncher.SessionPolicyTest
+          python3 -I companion/prepare.py fixed-source companion
+      - name: Compile companion only
+        shell: bash
+        run: |
+          set -euo pipefail
+          BT="$ANDROID_HOME/build-tools/36.0.0"
+          API="$ANDROID_HOME/platforms/android-36/android.jar"
+          mkdir -p out/gen out/classes out/dex
+          for aidl in companion/src/android/crosvm/*.aidl companion/src/io/github/collegeming/archlauncher/*.aidl; do
+            "$BT/aidl" -Icompanion/src -p"$ANDROID_HOME/platforms/android-36/framework.aidl" -oout/gen "$aidl"
+          done
+          find companion/src out/gen -name '*.java' > out/sources.txt
+          javac --release 11 -classpath "$API" -d out/classes @out/sources.txt
+          "$BT/d8" --min-api 33 --lib "$API" --output out/dex $(find out/classes -name '*.class')
+          "$BT/aapt2" link -o out/unsigned.apk -I "$API" --manifest companion/AndroidManifest.xml
+          (cd out/dex && zip -q ../unsigned.apk classes.dex)
+          "$BT/zipalign" -f 4 out/unsigned.apk out/aligned.apk
+      - name: Sign with installed companion stable key and verify identity
+        env:
+          KEYSTORE: ${{ secrets.ARCH_LAUNCHER_KEYSTORE }}
+          KEY_PASS: ${{ secrets.ARCH_LAUNCHER_KEY_PASS }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$KEYSTORE" && test -n "$KEY_PASS"
+          trap 'rm -f "$RUNNER_TEMP/arch-launcher.jks"' EXIT
+          printf '%s' "$KEYSTORE" | base64 -d > "$RUNNER_TEMP/arch-launcher.jks"
+          BT="$ANDROID_HOME/build-tools/36.0.0"
+          "$BT/apksigner" sign --ks "$RUNNER_TEMP/arch-launcher.jks" --ks-pass env:KEY_PASS --key-pass env:KEY_PASS --out out/Arch-Linux-unified.apk out/aligned.apk
+          "$BT/apksigner" verify --verbose --print-certs out/Arch-Linux-unified.apk > out/certificate.txt
+          grep -q '051431b40b0726cfcdc097f369f2272e5a87823ed6740a4bcf81f0c5184095a9' out/certificate.txt
+          sha256sum out/Arch-Linux-unified.apk > out/SHA256SUMS
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Arch-Linux-unified
+          path: |
+            out/Arch-Linux-unified.apk
+            out/SHA256SUMS
+            out/certificate.txt
+            companion/LICENSE.txt
+            companion/ADDITIONAL-PERMISSIONS
