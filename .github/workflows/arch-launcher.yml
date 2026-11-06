@@ -24,7 +24,11 @@ jobs:
           set -euo pipefail
           BT="$ANDROID_HOME/build-tools/36.0.0"
           ANDROID="$ANDROID_HOME/platforms/android-36/android.jar"
-          mkdir -p out/classes out/dex
+          mkdir -p out/classes out/dex out/tests
+          sh -n companion/assets/crosvm-process-guard.sh
+          python3 -I companion/test_process_guard.py
+          javac --release 11 -d out/tests companion/src/io/github/collegeming/archlauncher/LaunchPolicy.java companion/test/io/github/collegeming/archlauncher/LaunchPolicyTest.java
+          java -cp out/tests io.github.collegeming.archlauncher.LaunchPolicyTest
           javac --release 11 -classpath "$ANDROID" -d out/classes $(find companion/src -name '*.java')
           "$BT/d8" --min-api 33 --lib "$ANDROID" --output out/dex $(find out/classes -name '*.class')
           "$BT/aapt2" link -o out/base.apk -I "$ANDROID" --manifest companion/AndroidManifest.xml -A companion/assets

@@ -119,6 +119,11 @@ public final class MainActivity extends Activity {
                 String[] values = config.split("\\s+", 2);
                 if (values.length != 2) throw new Exception("daemon \u672a\u51c6\u5907\u597d\uff0c\u8bf7\u5148\u5b8c\u6210\u53d7\u63a7\u542f\u52a8\u3002");
                 int port = Integer.parseInt(values[0]);
+                String processGuard;
+                stage = "CROSVM_GUARD";
+                try (InputStream in = getAssets().open("crosvm-process-guard.sh")) {
+                    processGuard = new String(in.readAllBytes(), StandardCharsets.UTF_8);
+                }
                 stage = "CONNECT";
                 try (Socket socket = new Socket()) {
                     socket.connect(new InetSocketAddress("127.0.0.1", port), 4000);
@@ -149,10 +154,14 @@ public final class MainActivity extends Activity {
                     // Treat every non-stopped peer as potentially owning the shared disk.
                     stage = "VM_LIST";
                     var peers = request(socket, "vm_list", new JSONObject()).getJSONArray("data");
+                    long targetPid = -1;
                     for (int i = 0; i < peers.length(); i++) {
                         stage = "VM_LIST";
                         String peer = peers.getJSONObject(i).getString("id");
-                        if (VM.equals(peer)) continue;
+                        if (VM.equals(peer)) {
+                            targetPid = peers.getJSONObject(i).getLong("pid");
+                            continue;
+                        }
                         stage = "VM_PEER_STATUS";
                         String peerState = request(socket, "vm_status", new JSONObject().put("vm_id", peer))
                             .getString("state");
@@ -163,14 +172,56 @@ public final class MainActivity extends Activity {
                         stage = "VM_DISK";
                         if (usesArchDisk(configPeer)) throw new Exception("shared disk busy");
                     }
+                    boolean stopped = "stopped".equals(state);
+                    stage = "CROSVM_PID";
+                    if (!stopped && targetPid <= 1) throw new Exception("missing live target PID");
+                    long allowedPid = stopped ? 0 : targetPid;
+                    // Two read-only scans narrow, but cannot eliminate, the cross-client race.
+                    for (int pass = 0; pass < 2; pass++) {
+                        stage = "CROSVM_SCAN";
+                        String result = root(String.format(java.util.Locale.ROOT,
+                            "DROIDVM_ALLOWED_PID=%d\n%s", allowedPid, processGuard));
+                        stage = "CROSVM_BUSY";
+                        if (result.equals("BUSY")) throw new Exception("unmanaged crosvm exists");
+                        stage = "CROSVM_READ";
+                        if (!result.equals("CLEAR")) throw new Exception("process inspection failed");
+                        stage = "VM_RECHECK";
+                        if (!state.equals(request(socket, "vm_status", new JSONObject().put("vm_id", VM))
+                            .getString("state"))) throw new Exception("target state changed");
+                        var current = request(socket, "vm_list", new JSONObject()).getJSONArray("data");
+                        boolean same = false;
+                        for (int j = 0; j < current.length(); j++) {
+                            JSONObject entry = current.getJSONObject(j);
+                            if (VM.equals(entry.optString("id")))
+                                same = LaunchPolicy.sameTarget(stopped, allowedPid,
+                                    entry.getLong("pid"), state, entry.getString("state"));
+                        }
+                        if (!same) throw new Exception("target PID changed");
+                    }
+                    stage = "ACTIVITY";
+                    // Standard launchMode + CLEAR_TOP (without SINGLE_TOP) replaces the old
+                    // native Activity. Its onCreate -> display_attach -> onRootConnected owns
+                    // vm_start and Surface setup. Never send vm_start from this companion.
+                    String flags = LaunchPolicy.activityFlags(stopped);
+                    String activityResult = root(String.format(java.util.Locale.ROOT,
+                        "am start -W %s -n cn.classfun.droidvm/.ui.vm.display.nativedisplay.display.VMNativeDisplayActivity --es vm_id %s --es vm_name arch-niri-mali --es screen gpu-0 --ez input_enabled true --el display_width 2272 --el display_height 1514", flags, VM));
+                    String amResult = activityResult.toLowerCase(java.util.Locale.ROOT);
+                    if (amResult.contains("error") || amResult.contains("exception")
+                        || !amResult.matches("(?s).*status:\\s*ok\\b.*"))
+                        throw new Exception("Activity launch failed");
+                    stage = "START_CONFIRM";
+                    long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(30);
+                    boolean running = false;
+                    while (System.nanoTime() < deadline) {
+                        String actual = request(socket, "vm_status", new JSONObject().put("vm_id", VM))
+                            .getString("state");
+                        if (actual.equals("running")) { running = true; break; }
+                        if (!actual.equals("stopped") && !actual.equals("starting"))
+                            throw new Exception("unexpected post-launch state");
+                        Thread.sleep(500);
+                    }
+                    if (!running) throw new Exception("native activity did not start VM");
                 }
-                stage = "ACTIVITY";
-                String activityResult = root(String.format(java.util.Locale.ROOT,
-                    "am start -W --activity-single-top --activity-reorder-to-front -n cn.classfun.droidvm/.ui.vm.display.nativedisplay.display.VMNativeDisplayActivity --es vm_id %s --es vm_name arch-niri-mali --es screen gpu-0 --ez input_enabled true --el display_width 2272 --el display_height 1514", VM));
-                String amResult = activityResult.toLowerCase(java.util.Locale.ROOT);
-                if (amResult.contains("error") || amResult.contains("exception")
-                    || !amResult.matches("(?s).*status:\\s*ok\\b.*"))
-                    throw new Exception("Activity launch failed");
                 runOnUiThread(() -> {
                     status.setText("\u5df2\u6253\u5f00\u539f\u751f\u663e\u793a\uff0c\u8bf7\u70b9\u51fb\u5176\u5168\u5c4f\u6309\u94ae\u3002Ctrl+Alt+F12 \u9000\u51fa\u72ec\u5360\u9700\u8981 daemon \u5df2\u914d\u7f6e\u9003\u751f\u952e\u3002");
                     launching = false;
@@ -183,6 +234,8 @@ public final class MainActivity extends Activity {
                 runOnUiThread(() -> {
                     status.setText(String.format(java.util.Locale.ROOT,
                         "\u672a\u5b8c\u6210 [E_%s]\u3002\u8bf7\u5c06\u6b64\u9636\u6bb5\u7801\u63d0\u4f9b\u7ed9\u6392\u67e5\u4eba\u5458\u3002\u4e0d\u4f1a\u6062\u590d runtime \u6216\u51b7\u542f\u52a8 daemon\u3002", failedStage));
+                    if (failedStage.equals("CROSVM_BUSY"))
+                        status.setText("[E_CROSVM_BUSY] \u53e6\u4e00\u865a\u62df\u673a\u6216\u672a\u5f52\u5c5e crosvm \u6b63\u5728\u8fd0\u884c\u3002\u8bf7\u7b49\u5f85\u5176\u5b9e\u9a8c\u7ed3\u675f\uff1b\u542f\u52a8\u5668\u4e0d\u4f1a\u505c\u6b62\u5b83\u3002\u8fd9\u4e0d\u662f hash \u6821\u9a8c\u5931\u8d25\u3002");
                     launching = false;
                     open.setEnabled(true);
                 });
