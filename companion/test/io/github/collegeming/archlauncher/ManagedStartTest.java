@@ -23,6 +23,8 @@ public final class ManagedStartTest {
         check(!StartPolicy.configured(gfx,new String[]{"DROIDVM_RUNTIME_PROFILE=gfxstream-v1","DROIDVM_RUNTIME_PROFILE=gfxstream-v1"},guard));
         check(!StartPolicy.configured(gfx,new String[]{"DROIDVM_RUNTIME_PROFILE=gfxstream-v1"},new String[]{StartPolicy.GUARD,StartPolicy.GUARD}));
         check(!StartPolicy.configured(gfx,new String[]{"DROIDVM_RUNTIME_PROFILE=gfxstream-v1"},new String[]{"--droidvm-profile-guard=v2"}));
+        check(StartPolicy.knownDispatcher(StartPolicy.DURABLE_DISPATCHER_SHA));
+        Host durable=new Host("stopped","stopped","running");durable.hash=StartPolicy.DURABLE_DISPATCHER_SHA;check(durable.run(true)==1&&durable.starts==1);
         Host running=new Host("running");check(running.run(true)==1&&running.starts==0);
         Host stopped=new Host("stopped","stopped","starting","running");check(stopped.run(true)==1&&stopped.starts==1);
         Host rearm=new Host("stopped");check(rearm.run(false)==ManagedStart.NOT_READY&&rearm.starts==0);
