@@ -39,6 +39,13 @@ public final class SessionService extends Service {
     private int lastResult;
     private boolean inputFault;
     private boolean startAuthorized;
+    // Explicit CONNECT may arrive before a reused Activity attaches; consume once, never on ordinary return.
+    private boolean captureResumePending;
+    private void requestCaptureResume(){captureResumePending=true;consumeCaptureResume();}
+    private void consumeCaptureResume(){
+        if(!captureResumePending||display==null||inputBlocked()||stopped)return;
+        captureResumePending=false;display.allowPointerCapture();
+    }
     private long localDrops;
     private boolean receiverRegistered;
     private DisplayActivity display;
@@ -60,13 +67,13 @@ public final class SessionService extends Service {
         notifyState();
         String action=intent==null?null:intent.getAction();
         if(DISCONNECT.equals(action)){disconnect();return START_NOT_STICKY;}
-        if(RELEASE.equals(action)){manual=true;gate(false);detail="输入已手动释放；请在设置显式恢复";changed();return START_NOT_STICKY;}
+        if(RELEASE.equals(action)){captureResumePending=false;manual=true;gate(false);detail="输入已手动释放；请在设置显式恢复";changed();return START_NOT_STICKY;}
         if(CONNECT.equals(action)) {
             int requested=SessionPolicy.route(intent.getIntExtra("route",0));
             startAuthorized=true;
-            if(process==null&&!starting) {route=requested;manual=false;startBroker();}
+            if(process==null&&!starting) {route=requested;manual=false;inputFault=false;requestCaptureResume();startBroker();}
             else if(requested!=route) {detail="切换路线前请先断开；VM不会被关闭";changed();}
-            else {manual=false;inputFault=false;if(display!=null)display.allowPointerCapture();if(broker!=null&&!connected&&!lease.pending())prepare(false);else if(display!=null)display.refreshGate();changed();}
+            else {manual=false;inputFault=false;requestCaptureResume();if(broker!=null&&!connected&&!lease.pending())prepare(false);else if(display!=null)display.refreshGate();changed();}
         }
         return START_NOT_STICKY;
     }
@@ -129,7 +136,7 @@ public final class SessionService extends Service {
         try{
             org.json.JSONObject state=new org.json.JSONObject(value);keyboardHeld=state.getJSONArray("held").length();
             String reason=state.optString("reason","UNKNOWN");grabDetail="键盘held: "+keyboardHeld+" · "+reason;
-            if("ESCAPE_RELEASED".equals(reason)){manual=true;gate(false);detail="root释放快捷键已生效；设置或进入快捷键可显式恢复";}
+            if("ESCAPE_RELEASED".equals(reason)){captureResumePending=false;manual=true;gate(false);detail="root释放快捷键已生效；设置或进入快捷键可显式恢复";}
             else if(reason.equals("RAW_DELIVERY_FAILED")||reason.equals("DEVICE_LOST")||reason.equals("INPUT_DELIVERY_FAILED")||reason.equals("RAW_QUEUE_FULL")){
                 inputFault=true;gate(false);detail="键盘已释放 ["+reason+"]；设置中可显式恢复";
             }
@@ -153,7 +160,7 @@ public final class SessionService extends Service {
             });
         });return true;}catch(RejectedExecutionException ignored){inputFault=true;gate(false);return true;}
     }
-    void attachDisplay(DisplayActivity activity){if(display!=activity){gate(false);display=activity;}if(connected)activity.sessionReady();changed();}
+    void attachDisplay(DisplayActivity activity){if(display!=activity){gate(false);display=activity;}consumeCaptureResume();if(connected)activity.sessionReady();changed();}
     void removeDisplay(DisplayActivity activity){if(display==activity){gate(false);display=null;}}
     Object inputLeaseIdentity(){return canInput()?lease.ticket():null;}
     boolean canInput(){return connected&&!inputBlocked()&&lease.current(lease.ticket());}
@@ -167,10 +174,10 @@ public final class SessionService extends Service {
             main.post(()->{if(!lease.current(ticket))return;if(rootReleased){gate(false);resumeByHotkey();}else releaseByHotkey();});
         });
     }
-    void releaseByHotkey(){manual=true;gate(false);detail="输入已由快捷键释放；进入快捷键或设置可显式恢复";changed();}
+    void releaseByHotkey(){captureResumePending=false;manual=true;gate(false);detail="输入已由快捷键释放；进入快捷键或设置可显式恢复";changed();}
     void resumeByHotkey(){
         if(!connected||display==null)return;
-        manual=false;inputFault=false;display.allowPointerCapture();display.refreshGate();detail="已请求恢复输入（需显示焦点、Surface就绪且无IME）";changed();
+        manual=false;inputFault=false;requestCaptureResume();display.refreshGate();detail="已请求恢复输入（需显示焦点、Surface就绪且无IME）";changed();
     }
     boolean inputBlocked(){return manual||inputFault;}
     boolean isConnected(){return connected;}
@@ -209,7 +216,7 @@ public final class SessionService extends Service {
                 if(outcome!=BrokerGate.DELIVERED){
                     // A stale worker is not an escape key or a user-requested manual release.
                     inputFault=outcome!=BrokerGate.STALE;
-                    if(outcome==BrokerGate.ESCAPE)manual=true;
+                    if(outcome==BrokerGate.ESCAPE){captureResumePending=false;manual=true;}
                     gate(false);
                     detail="输入暂停 ["+BrokerGate.label(outcome)+"] · ch="+channel+" · generation="+g+"；设置中可显式恢复";
                     changed();
@@ -235,7 +242,7 @@ public final class SessionService extends Service {
         startForeground(1,n.build(),ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE);
     }
     private void disconnect(){
-        stopped=true;++launchId;starting=false;
+        captureResumePending=false;stopped=true;++launchId;starting=false;
         connected=false;gate(false);
         if(display!=null)display.disconnected();
         try{if(ownerPipe!=null)ownerPipe.close();}catch(Exception ignored){}
