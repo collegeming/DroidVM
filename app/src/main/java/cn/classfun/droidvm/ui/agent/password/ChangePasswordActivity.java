@@ -1,0 +1,186 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright DroidVM contributors
+// Additional permissions apply; see ADDITIONAL-PERMISSIONS in the repository root.
+package cn.classfun.droidvm.ui.agent.password;
+
+import static cn.classfun.droidvm.lib.utils.StringUtils.SHELL_SAFE_PASSWORD_SYMBOLS;
+import static cn.classfun.droidvm.lib.utils.StringUtils.fmt;
+import static cn.classfun.droidvm.lib.utils.StringUtils.isShellSafePassword;
+import static cn.classfun.droidvm.lib.utils.StringUtils.shellSafePasswordFilter;
+
+import android.content.Context;
+import android.content.Intent;
+import android.os.Bundle;
+import android.text.InputFilter;
+import android.util.Log;
+import android.widget.TextView;
+
+import androidx.activity.result.ActivityResultLauncher;
+import androidx.activity.result.contract.ActivityResultContracts;
+import androidx.annotation.NonNull;
+import androidx.appcompat.app.AppCompatActivity;
+
+import com.google.android.material.appbar.CollapsingToolbarLayout;
+import com.google.android.material.appbar.MaterialToolbar;
+import com.google.android.material.floatingactionbutton.FloatingActionButton;
+import com.google.android.material.materialswitch.MaterialSwitch;
+import com.google.android.material.textfield.TextInputEditText;
+import com.google.android.material.textfield.TextInputLayout;
+
+import java.util.UUID;
+
+import cn.classfun.droidvm.R;
+import cn.classfun.droidvm.lib.store.disk.DiskStore;
+import cn.classfun.droidvm.lib.store.vm.VMBackend;
+import cn.classfun.droidvm.lib.store.vm.VMHypervisor;
+import cn.classfun.droidvm.ui.agent.AgentOperationActivity;
+import cn.classfun.droidvm.ui.agent.base.AgentVM;
+
+public final class ChangePasswordActivity extends AppCompatActivity {
+    private static final String TAG = "ChangePasswordActivity";
+    public static final String EXTRA_DISK_ID = "disk_id";
+    private static final String EXTRA_QUICK_PASSWORD = "quick_password";
+    private TextInputLayout tilPassword;
+    private TextInputEditText etPassword;
+    private TextInputLayout tilConfirmPassword;
+    private TextInputEditText etConfirmPassword;
+    private MaterialToolbar toolbar;
+    private CollapsingToolbarLayout collapsingToolbar;
+    private FloatingActionButton fabConfirm;
+    private TextView tvDiskName;
+    private MaterialSwitch swNormalUsers;
+    private UUID diskId;
+    private ActivityResultLauncher<Intent> operationLauncher;
+
+    @NonNull
+    public static Intent createIntent(@NonNull Context context, @NonNull UUID diskId) {
+        var intent = new Intent(context, ChangePasswordActivity.class);
+        intent.putExtra(EXTRA_DISK_ID, diskId.toString());
+        return intent;
+    }
+
+    /** Skips the confirmation form and immediately changes only the root password. */
+    @NonNull
+    public static Intent createQuickIntent(
+        @NonNull Context context,
+        @NonNull UUID diskId,
+        @NonNull String password
+    ) {
+        var intent = createIntent(context, diskId);
+        intent.putExtra(EXTRA_QUICK_PASSWORD, password);
+        return intent;
+    }
+
+    @Override
+    protected void onCreate(Bundle savedInstanceState) {
+        super.onCreate(savedInstanceState);
+        setContentView(R.layout.activity_change_password);
+        toolbar = findViewById(R.id.toolbar);
+        collapsingToolbar = findViewById(R.id.collapsing_toolbar);
+        tvDiskName = findViewById(R.id.tv_disk_name);
+        tilPassword = findViewById(R.id.til_password);
+        etPassword = findViewById(R.id.et_password);
+        tilConfirmPassword = findViewById(R.id.til_confirm_password);
+        etConfirmPassword = findViewById(R.id.et_confirm_password);
+        swNormalUsers = findViewById(R.id.sw_normal_users);
+        fabConfirm = findViewById(R.id.fab_confirm);
+        operationLauncher = registerForActivityResult(
+            new ActivityResultContracts.StartActivityForResult(), result -> {
+                setResult(result.getResultCode());
+                finish();
+            });
+        initialize(savedInstanceState == null);
+    }
+
+    private void initialize(boolean isFreshStart) {
+        collapsingToolbar.setTitle(getString(R.string.change_password_title));
+        toolbar.setNavigationOnClickListener(v -> finish());
+        var diskIdStr = getIntent().getStringExtra(EXTRA_DISK_ID);
+        if (diskIdStr == null) {
+            Log.e(TAG, "Missing disk_id extra");
+            finish();
+            return;
+        }
+        diskId = UUID.fromString(diskIdStr);
+        var diskStore = new DiskStore();
+        diskStore.load(this);
+        var diskConfig = diskStore.findById(diskId);
+        if (diskConfig == null) {
+            Log.e(TAG, fmt("Disk not found: %s", diskId));
+            finish();
+            return;
+        }
+        tvDiskName.setText(getString(R.string.change_password_disk_label, diskConfig.getName()));
+        // The password rides through the rescue VM's chpasswd shell script;
+        // only characters that script may carry can be entered.
+        etPassword.setFilters(new InputFilter[]{shellSafePasswordFilter()});
+        etConfirmPassword.setFilters(new InputFilter[]{shellSafePasswordFilter()});
+        var quickPassword = getIntent().getStringExtra(EXTRA_QUICK_PASSWORD);
+        // Do not retain the password in this Activity's explicit intent.
+        getIntent().removeExtra(EXTRA_QUICK_PASSWORD);
+        if (isFreshStart && quickPassword != null && !quickPassword.isEmpty()) {
+            if (isShellSafePassword(quickPassword)) {
+                startPasswordChange(quickPassword, false, true);
+                return;
+            }
+            // Never hand an unvetted password to the script; fall back to the form.
+            Log.w(TAG, "Quick password contains unsupported characters; showing form");
+            tilPassword.setError(getString(
+                R.string.change_password_error_unsafe, SHELL_SAFE_PASSWORD_SYMBOLS));
+        }
+        fabConfirm.setOnClickListener(v -> onConfirm());
+    }
+
+    private void onConfirm() {
+        tilPassword.setError(null);
+        tilConfirmPassword.setError(null);
+        var password = etPassword.getText() != null ? etPassword.getText().toString() : "";
+        var confirmPassword = etConfirmPassword.getText() != null ?
+            etConfirmPassword.getText().toString() : "";
+        if (password.isEmpty()) {
+            tilPassword.setError(getString(R.string.change_password_error_empty));
+            return;
+        }
+        if (!isShellSafePassword(password)) {
+            tilPassword.setError(getString(
+                R.string.change_password_error_unsafe, SHELL_SAFE_PASSWORD_SYMBOLS));
+            return;
+        }
+        if (!password.equals(confirmPassword)) {
+            tilConfirmPassword.setError(getString(R.string.change_password_error_mismatch));
+            return;
+        }
+        startPasswordChange(password, swNormalUsers.isChecked(), false);
+    }
+
+    private void startPasswordChange(
+        @NonNull String password,
+        boolean changeNormalUsers,
+        boolean quickMode
+    ) {
+        var diskStore = new DiskStore();
+        diskStore.load(this);
+        var diskConfig = diskStore.findById(diskId);
+        if (diskConfig == null) {
+            Log.e(TAG, fmt("Disk not found: %s", diskId));
+            finish();
+            return;
+        }
+        // Password rescue deliberately selects QEMU TCG and its human UART. AgentVM carries the
+        // explicit console mapping so other operations can select a different backend and tty.
+        var agentVM = new AgentVM(VMBackend.QEMU, VMHypervisor.SOFT);
+        agentVM.setOperationConsole("uart", "/dev/ttyAMA0");
+        var action = new PasswordAction(agentVM);
+        action.setPassword(password);
+        action.setChangeNormalUsers(changeNormalUsers);
+        agentVM.addDisk(diskConfig);
+        var intent = AgentOperationActivity.createIntent(this, agentVM);
+        if (quickMode) {
+            intent.putExtra(AgentOperationActivity.EXTRA_AUTOFINISH_ON_SUCCESS, true);
+            operationLauncher.launch(intent);
+        } else {
+            startActivity(intent);
+            finish();
+        }
+    }
+}

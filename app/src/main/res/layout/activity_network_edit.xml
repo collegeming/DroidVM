@@ -1,0 +1,208 @@
+<?xml version="1.0" encoding="utf-8"?>
+<androidx.coordinatorlayout.widget.CoordinatorLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    xmlns:tools="http://schemas.android.com/tools"
+    android:id="@+id/main"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:fitsSystemWindows="true"
+    tools:context=".ui.network.edit.NetworkEditActivity">
+
+    <com.google.android.material.appbar.AppBarLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:fitsSystemWindows="true">
+
+        <com.google.android.material.appbar.CollapsingToolbarLayout
+            android:id="@+id/collapsing_toolbar"
+            style="?attr/collapsingToolbarLayoutMediumStyle"
+            android:layout_width="match_parent"
+            android:layout_height="?attr/collapsingToolbarLayoutMediumSize"
+            app:layout_scrollFlags="scroll|exitUntilCollapsed"
+            app:title="@string/network_create_title">
+
+            <com.google.android.material.appbar.MaterialToolbar
+                android:id="@+id/toolbar"
+                android:layout_width="match_parent"
+                android:layout_height="?attr/actionBarSize"
+                app:layout_collapseMode="pin"
+                app:navigationIcon="?attr/homeAsUpIndicator" />
+
+        </com.google.android.material.appbar.CollapsingToolbarLayout>
+
+    </com.google.android.material.appbar.AppBarLayout>
+
+    <androidx.core.widget.NestedScrollView
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        app:layout_behavior="@string/appbar_scrolling_view_behavior">
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical">
+
+            <TextView
+                android:id="@+id/tv_running_banner"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:background="?attr/colorErrorContainer"
+                android:padding="16dp"
+                android:text="@string/network_edit_running_banner"
+                android:textColor="?attr/colorOnErrorContainer"
+                android:visibility="gone" />
+
+            <cn.classfun.droidvm.ui.widgets.container.CollapsibleContainer
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:title="@string/network_edit_category_basic"
+                app:cc_collapsible="false">
+
+                <cn.classfun.droidvm.ui.widgets.row.TextInputRowWidget
+                    android:id="@+id/input_name"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:hint="@string/network_edit_name_hint"
+                    android:icon="@drawable/ic_edit"
+                    android:inputType="text" />
+
+                <cn.classfun.droidvm.ui.widgets.row.TextInputRowWidget
+                    android:id="@+id/input_bridge"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:hint="@string/network_edit_bridge_hint"
+                    android:icon="@drawable/ic_switch"
+                    android:inputType="textNoSuggestions" />
+
+                <cn.classfun.droidvm.ui.widgets.row.SwitchRowWidget
+                    android:id="@+id/sw_auto_up"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:checked="true"
+                    android:icon="@drawable/ic_power"
+                    android:text="@string/network_edit_auto_up" />
+
+                <cn.classfun.droidvm.ui.widgets.row.SwitchRowWidget
+                    android:id="@+id/sw_stp"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:icon="@drawable/ic_source_branch"
+                    android:text="@string/network_edit_stp" />
+
+                <cn.classfun.droidvm.ui.widgets.row.DropdownRowWidget
+                    android:id="@+id/dd_bridge_type"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:hint="@string/network_edit_bridge_type"
+                    android:icon="@drawable/ic_switch" />
+
+                <cn.classfun.droidvm.ui.widgets.row.DropdownRowWidget
+                    android:id="@+id/dd_uplink_mode"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:hint="@string/network_edit_uplink_mode"
+                    android:icon="@drawable/ic_web_plus" />
+
+            </cn.classfun.droidvm.ui.widgets.container.CollapsibleContainer>
+
+            <cn.classfun.droidvm.ui.widgets.container.CollapsibleContainer
+                android:id="@+id/group_l2"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:title="@string/network_edit_category_l2"
+                android:visibility="gone"
+                app:cc_collapsible="false">
+
+                <cn.classfun.droidvm.ui.widgets.row.DropdownRowWidget
+                    android:id="@+id/dd_l2_uplink"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:hint="@string/network_edit_l2_uplink"
+                    android:icon="@drawable/ic_ethernet" />
+
+                <cn.classfun.droidvm.ui.widgets.row.SwitchRowWidget
+                    android:id="@+id/sw_pseudo_bridge"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="@string/network_edit_pseudo_bridge"
+                    android:icon="@drawable/ic_connection" />
+
+                <TextView
+                    android:id="@+id/tv_pseudo_hint"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:paddingStart="72dp"
+                    android:paddingEnd="16dp"
+                    android:paddingBottom="8dp"
+                    android:textColor="?attr/colorOnSurfaceVariant"
+                    android:textSize="13sp" />
+
+            </cn.classfun.droidvm.ui.widgets.container.CollapsibleContainer>
+
+            <cn.classfun.droidvm.ui.widgets.container.CollapsibleContainer
+                android:id="@+id/group_l3"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:title="@string/network_edit_category_l3"
+                android:visibility="gone"
+                app:cc_collapsible="false">
+
+                <cn.classfun.droidvm.ui.widgets.row.TextInputRowWidget
+                    android:id="@+id/input_mac"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:hint="@string/network_edit_mac_hint"
+                    android:icon="@drawable/ic_ethernet"
+                    android:inputType="textNoSuggestions"
+                    app:ti_endIcon="@drawable/ic_refresh"
+                    app:ti_endIconMode="custom" />
+
+                <LinearLayout
+                    android:id="@+id/container_vlans"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical" />
+
+                <TextView
+                    android:id="@+id/tv_vlan_empty"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:paddingStart="16dp"
+                    android:paddingEnd="16dp"
+                    android:paddingBottom="8dp"
+                    android:text="@string/network_edit_vlan_empty_hint"
+                    android:textColor="?attr/colorOnSurfaceVariant"
+                    android:textSize="13sp"
+                    android:visibility="gone" />
+
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/btn_add_vlan"
+                    style="@style/Widget.Material3.Button.TonalButton"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginStart="16dp"
+                    android:layout_marginEnd="16dp"
+                    android:layout_marginBottom="8dp"
+                    android:text="@string/network_edit_add_vlan"
+                    app:icon="@drawable/ic_add" />
+
+            </cn.classfun.droidvm.ui.widgets.container.CollapsibleContainer>
+
+            <Space
+                android:layout_width="match_parent"
+                android:layout_height="128dp" />
+
+        </LinearLayout>
+
+    </androidx.core.widget.NestedScrollView>
+
+    <com.google.android.material.floatingactionbutton.FloatingActionButton
+        android:id="@+id/fab_save"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="bottom|end"
+        android:layout_margin="16dp"
+        android:contentDescription="@string/network_edit_save"
+        android:src="@drawable/ic_check" />
+
+</androidx.coordinatorlayout.widget.CoordinatorLayout>
