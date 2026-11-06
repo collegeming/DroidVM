@@ -2,7 +2,7 @@ package io.github.collegeming.archlauncher;
 
 /** Root broker's actual lifecycle state; callers serialize access. No Android dependencies. */
 final class BrokerGate {
-    static final int DELIVERED=1, STALE=2, PAUSED=3, ESCAPE=4, INVALID=5, NOT_DELIVERED=6, IPC_ERROR=7, ACK_MISSING=9;
+    static final int DELIVERED=1, STALE=2, PAUSED=3, ESCAPE=4, INVALID=5, NOT_DELIVERED=6, IPC_ERROR=7, HELD_SUPPRESSED=8, ACK_MISSING=9;
     private long sequence, generation;
     private int pauseReason=PAUSED;
     long attach(){generation=++sequence;pauseReason=0;return generation;}

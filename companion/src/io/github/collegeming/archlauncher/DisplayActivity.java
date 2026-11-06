@@ -101,6 +101,7 @@ public final class DisplayActivity extends Activity {
         if(e.getKeyCode()==KeyEvent.KEYCODE_VOLUME_DOWN||e.getKeyCode()==KeyEvent.KEYCODE_VOLUME_UP)return super.dispatchKeyEvent(e);
         if(input!=null&&service!=null&&service.canInput()&&(e.getAction()==KeyEvent.ACTION_DOWN||e.getAction()==KeyEvent.ACTION_UP)){
             if(e.getRepeatCount()>0)return true;
+            if(service.sendPhysicalKey(e))return true;
             if(input.sendKeyEvent(e.getKeyCode(),e.getAction()==KeyEvent.ACTION_DOWN))return true;
         }
         return super.dispatchKeyEvent(e);

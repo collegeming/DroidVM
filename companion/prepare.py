@@ -26,6 +26,22 @@ for name in files:
         text = text.replace('            needsSend = false;\n            var svc = displayService;','            needsSend = false;\n            onConnected.accept(false);\n            var svc = displayService;')
         text = text.replace('    void shutdown() {\n        if (displayService != null) {','    void shutdown() {\n        if (displayService != null) {\n            try { displayService.removeSurface(false); } catch (Exception ignored) {}\n            try { displayService.removeSurface(true); } catch (Exception ignored) {}')
     (out / Path(name).name).write_text(text + '\n', encoding='utf-8')
+# Keep UnixHelper's original JNI class name; load the existing official native helper, read-only.
+helper=(java/'lib/natives/UnixHelper.java').read_text(encoding='utf-8')
+helper=helper.replace('import static cn.classfun.droidvm.lib.Constants.DATA_DIR;', '')
+helper=helper.replace('import static cn.classfun.droidvm.lib.utils.StringUtils.fmt;', '')
+helper=helper.replace('import static cn.classfun.droidvm.lib.utils.StringUtils.pathJoin;', '')
+helper=helper.replace('var libPath = pathJoin(DATA_DIR, "lib", LIB_NAME);','var libPath = "/data/data/cn.classfun.droidvm/lib/" + LIB_NAME;')
+helper=helper.replace('fmt(', 'String.format(java.util.Locale.ROOT, ')
+helper='\n'.join(line for line in helper.splitlines() if not line.startswith('import androidx.annotation.'))
+for annotation in ['@NonNull ', '@Nullable ', '@NonNull', '@Nullable']: helper=helper.replace(annotation,'')
+dest=target/'src/cn/classfun/droidvm/lib/natives/UnixHelper.java';dest.parent.mkdir(parents=True,exist_ok=True);dest.write_text(helper+'\n',encoding='utf-8')
+keyboard=(java/'daemon/input/HostKeyboard.java').read_text(encoding='utf-8')
+keyboard=keyboard.replace('package cn.classfun.droidvm.daemon.input;','package io.github.collegeming.archlauncher;').replace('cn.classfun.droidvm.lib.utils.StringUtils','io.github.collegeming.archlauncher.Strings')
+keyboard='\n'.join(line for line in keyboard.splitlines() if not line.startswith('import androidx.annotation.'))
+for annotation in ['@NonNull ', '@Nullable ', '@NonNull', '@Nullable']: keyboard=keyboard.replace(annotation,'')
+keyboard=keyboard.replace('if (bits == null || !isTypingKeyboard(bits)) return null;', 'if (bits == null || !GrabPolicy.typing(bits)) return null;')
+(out/'HostKeyboard.java').write_text(keyboard+'\n',encoding='utf-8')
 for name in ['DisplayConfig.aidl','ICrosvmAndroidDisplayService.aidl']:
     dest = target / 'src/android/crosvm' / name
     dest.parent.mkdir(parents=True, exist_ok=True)

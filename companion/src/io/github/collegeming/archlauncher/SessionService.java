@@ -14,6 +14,16 @@ public final class SessionService extends Service {
     static final String RELEASE="release", DISCONNECT="disconnect", CONNECT="connect";
     final Handler main=new Handler(Looper.getMainLooper());
     private final ExecutorService control=Executors.newSingleThreadExecutor();
+    private final ExecutorService urgent=Executors.newSingleThreadExecutor();
+    private final ExecutorService keyWorker=new ThreadPoolExecutor(1,1,0,TimeUnit.MILLISECONDS,new ArrayBlockingQueue<>(64));
+    private String grabDetail="键盘held: 0";
+    private int keyboardHeld;
+    private final Runnable grabPoll=new Runnable(){public void run(){
+        if(stopped)return;
+        IInputBroker b=broker;String t=token;InputLease.Ticket ticket=lease.ticket();
+        if(b!=null&&lease.current(ticket))try{urgent.execute(()->{try{String value=b.grabStatus(t,ticket.generation);main.post(()->applyGrabStatus(ticket,value));}catch(Exception ignored){}});}catch(RejectedExecutionException ignored){}
+        main.postDelayed(this,1000);
+    }};
     private IInputBroker broker;
     private final IBinder lifetime=new Binder();
     private java.lang.Process process;
@@ -44,6 +54,7 @@ public final class SessionService extends Service {
     public void onCreate(){super.onCreate();active=this;
         getSystemService(NotificationManager.class).createNotificationChannel(new NotificationChannel("session","Arch Linux connection",NotificationManager.IMPORTANCE_LOW));
         registerReceiver(receiver,new IntentFilter(InputBroker.ACTION),"android.permission.DUMP",null,Context.RECEIVER_EXPORTED); receiverRegistered=true;
+        main.post(grabPoll);
     }
     public int onStartCommand(Intent intent,int flags,int startId){
         notifyState();
@@ -77,7 +88,10 @@ public final class SessionService extends Service {
         main.postDelayed(()->{if(!stopped&&launch==launchId&&broker==null)setError("E_ROOT_TIMEOUT");},12000);
     }
     private void releaseRemote(IInputBroker b,String t,long g){
-        if(b!=null&&g>0)try{control.execute(()->{try{b.releaseAll(t,g);}catch(Exception ignored){}});}catch(RejectedExecutionException ignored){}
+        if(b!=null&&g>0){
+            try{urgent.execute(()->{try{String value=b.keyboardGrab(t,g,false);main.post(()->{if(generation==g&&lease.ticket()==null){try{keyboardHeld=new org.json.JSONObject(value).getJSONArray("held").length();grabDetail="键盘held: "+keyboardHeld+"（已回读）";}catch(Exception ignored){}if(display!=null)display.updateStatus();}});}catch(Exception ignored){}});}catch(RejectedExecutionException ignored){}
+            try{control.execute(()->{try{b.releaseAll(t,g);}catch(Exception ignored){}});}catch(RejectedExecutionException ignored){}
+        }
     }
     private void prepare(boolean enable){
         final IInputBroker b=broker;final String t=token;
@@ -94,11 +108,49 @@ public final class SessionService extends Service {
                     if(!lease.complete(attempt,next)){releaseRemote(b,t,next);return;}
                     generation=next;connected=true;
                     if(!lease.current(lease.ticket()))releaseRemote(b,t,next);
+                    else armKeyboard(b,t,lease.ticket());
                     detail=canInput()?"管理VM已连接":"管理VM已连接，输入暂停";changed();
                     if(display!=null)display.sessionReady();
                 });
             }catch(Exception ignored){main.post(()->{if(lease.fail(attempt)&&!stopped)setError("BROKER_OR_DAEMON_UNHEALTHY（请断开并检查管理端）");});}
         });
+    }
+    private void armKeyboard(IInputBroker b,String t,InputLease.Ticket ticket){
+        boolean requested=getSharedPreferences("settings",0).getBoolean("exclusive",true);
+        urgent.execute(()->{
+            if(!lease.current(ticket))return;
+            try{String value=b.keyboardGrab(t,ticket.generation,requested);if(!lease.current(ticket)){b.keyboardGrab(t,ticket.generation,false);return;}main.post(()->applyGrabStatus(ticket,value));}
+            catch(Exception ignored){main.post(()->{if(lease.current(ticket))grabDetail="键盘grab不可用；普通转发";});}
+        });
+    }
+    private void applyGrabStatus(InputLease.Ticket ticket,String value){
+        if(!lease.current(ticket))return;
+        try{
+            org.json.JSONObject state=new org.json.JSONObject(value);keyboardHeld=state.getJSONArray("held").length();
+            String reason=state.optString("reason","UNKNOWN");grabDetail="键盘held: "+keyboardHeld+" · "+reason;
+            if("ESCAPE_RELEASED".equals(reason)){manual=true;gate(false);detail="root Ctrl+Alt+F12已释放；设置中可显式恢复";}
+            else if(reason.equals("RAW_DELIVERY_FAILED")||reason.equals("DEVICE_LOST")||reason.equals("INPUT_DELIVERY_FAILED")||reason.equals("RAW_QUEUE_FULL")){
+                inputFault=true;gate(false);detail="键盘已释放 ["+reason+"]；设置中可显式恢复";
+            }
+        }catch(Exception ignored){grabDetail="键盘held未知";}
+        if(display!=null)display.updateStatus();
+    }
+    boolean sendPhysicalKey(android.view.KeyEvent event){
+        final InputLease.Ticket ticket=lease.ticket();if(!lease.current(ticket))return false;
+        android.view.InputDevice device=event.getDevice();if(device==null||device.isVirtual())return false;
+        int code=KeyCodeMapper.androidToEvdev(event.getKeyCode());if(code<0)return false;
+        final IInputBroker b=broker;final String t=token,name=device.getName();final int vendor=device.getVendorId(),product=device.getProductId();
+        final byte[] bytes=EvdevEncoder.encodeKey((short)code,event.getAction()==android.view.KeyEvent.ACTION_DOWN);
+        try{keyWorker.execute(()->{
+            if(!lease.current(ticket))return;
+            int result;try{result=b.physicalKey(t,ticket.generation,name,vendor,product,bytes);}catch(Exception ignored){result=BrokerGate.IPC_ERROR;}
+            if(!lease.current(ticket)){releaseRemote(b,t,ticket.generation);return;}
+            final int outcome=result;main.post(()->{
+                if(!lease.current(ticket))return;
+                if(outcome==BrokerGate.DELIVERED)delivered=true;
+                else if(outcome!=BrokerGate.HELD_SUPPRESSED){inputFault=true;gate(false);detail="物理键输入暂停 ["+BrokerGate.label(outcome)+"]";changed();}
+            });
+        });return true;}catch(RejectedExecutionException ignored){inputFault=true;gate(false);return true;}
     }
     void attachDisplay(DisplayActivity activity){if(display!=activity){gate(false);display=activity;}if(connected)activity.sessionReady();changed();}
     void removeDisplay(DisplayActivity activity){if(display==activity){gate(false);display=null;}}
@@ -109,7 +161,7 @@ public final class SessionService extends Service {
     int route(){return route;}
     void gate(boolean allowed){
         if(!allowed||inputBlocked()){
-            lease.close();
+            lease.close();grabDetail="键盘释放中（最后确认held: "+keyboardHeld+"）";
             if(display!=null)display.clearInput();
             releaseRemote(broker,token,generation);
             changed();
@@ -152,7 +204,7 @@ public final class SessionService extends Service {
         forwarder.setInputMode(InputMode.values()[mode]);
         return forwarder;
     }
-    String status(){return SessionPolicy.NAMES[route]+"\n"+detail+"\n输入: "+(canInput()?"普通转发就绪":"已暂停")+" · 最近投递: "+(delivered?"成功":"未确认")+" · lease关闭丢弃: "+localDrops+"\nexclusive配置: "+(getSharedPreferences("settings",0).getBoolean("exclusive",true)?"开启":"关闭")+" · 实际held: 否（grab未完成）";}
+    String status(){return SessionPolicy.NAMES[route]+"\n"+detail+"\n输入: "+(canInput()?"普通转发就绪":"已暂停")+" · 最近投递: "+(delivered?"成功":"未确认")+" · lease关闭丢弃: "+localDrops+"\nexclusive配置: "+(getSharedPreferences("settings",0).getBoolean("exclusive",true)?"开启":"关闭")+" · "+grabDetail+"\n鼠标: 普通转发（未root grab） · 触摸屏: 不抓取";}
     private void setError(String code){if(stopped)return;connected=false;gate(false);detail=code;changed();}
     private void changed(){if(stopped)return;notifyState();if(display!=null)display.updateStatus();}
     private PendingIntent activity(Class<?> cls,int id){return PendingIntent.getActivity(this,id,new Intent(this,cls).addFlags(Intent.FLAG_ACTIVITY_REORDER_TO_FRONT),PendingIntent.FLAG_IMMUTABLE|PendingIntent.FLAG_UPDATE_CURRENT);}
@@ -176,5 +228,5 @@ public final class SessionService extends Service {
     }
     public void onDestroy(){if(receiverRegistered)unregisterReceiver(receiver);if(active==this)active=null;
         try{if(ownerPipe!=null)ownerPipe.close();}catch(Exception ignored){}
-        control.shutdown();super.onDestroy();}
+        main.removeCallbacks(grabPoll);control.shutdown();urgent.shutdown();keyWorker.shutdownNow();super.onDestroy();}
 }

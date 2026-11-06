@@ -32,7 +32,22 @@ public final class InputBroker {
     private IBinder.DeathRecipient death;
     private final int uid;
     private final String token;
-    private InputBroker(int uid,String token){this.uid=uid;this.token=token;}
+    private final PhysicalGrab physical;
+    private InputBroker(int uid,String token){
+        this.uid=uid;this.token=token;
+        physical=new PhysicalGrab(new PhysicalGrab.Sink(){
+            public void records(long session,byte[] bytes){
+                if(revoked.contains(session))return;
+                MonotonicDeadline budget=new MonotonicDeadline(1500);
+                try{io.execute(()->{int result=writeNow(session,1,bytes,budget);if(result!=BrokerGate.DELIVERED){physical.release(session,"RAW_DELIVERY_FAILED");revoked.add(session);MonotonicDeadline cleanup=new MonotonicDeadline(RELEASE_MS);queue(()->{if(gate.current(session))release(cleanup);});}});}
+                catch(RejectedExecutionException ignored){physical.release(session,"RAW_QUEUE_FULL");revoked.add(session);MonotonicDeadline cleanup=new MonotonicDeadline(RELEASE_MS);queue(()->{if(gate.current(session))release(cleanup);});}
+            }
+            public void released(long session,String reason){
+                revoked.add(session);MonotonicDeadline cleanup=new MonotonicDeadline(RELEASE_MS);
+                queue(()->{if(gate.pause(session,"ESCAPE_RELEASED".equals(reason)?BrokerGate.ESCAPE:BrokerGate.PAUSED))release(cleanup);});
+            }
+        });
+    }
     private void check(String value){
         if(Binder.getCallingUid()!=uid||!java.security.MessageDigest.isEqual(token.getBytes(java.nio.charset.StandardCharsets.US_ASCII),String.valueOf(value).getBytes(java.nio.charset.StandardCharsets.US_ASCII)))throw new SecurityException("session denied");
     }
@@ -74,6 +89,7 @@ public final class InputBroker {
     }
     private void retire(long expected,MonotonicDeadline budget){
         if(!gate.current(expected))return;
+        physical.release(expected,"SESSION_RETIRED");
         gate.pause(expected,BrokerGate.PAUSED);release(budget);gate.retire(expected);publishedGeneration=0;
         if(client!=null&&death!=null)client.unlinkToDeath(death,0);client=null;death=null;
         // Keep the old VM/dirty state if cleanup was not acknowledged: a new attach must retry it.
@@ -91,7 +107,7 @@ public final class InputBroker {
             if(type>3)return BrokerGate.INVALID;
             if(channel==1&&type==1){
                 if(value==0)modifiers.remove(code);else modifiers.add(code);
-                if(value!=0&&SessionPolicy.escape(code,modifiers.contains(29),modifiers.contains(97),modifiers.contains(56),modifiers.contains(100))){gate.pause(session,BrokerGate.ESCAPE);revoked.add(session);release(new MonotonicDeadline(RELEASE_MS));return BrokerGate.ESCAPE;}
+                if(value!=0&&SessionPolicy.escape(code,modifiers.contains(29),modifiers.contains(97),modifiers.contains(56),modifiers.contains(100))){physical.release(session,"ESCAPE_RELEASED");gate.pause(session,BrokerGate.ESCAPE);revoked.add(session);release(new MonotonicDeadline(RELEASE_MS));return BrokerGate.ESCAPE;}
             }
         }
         data.rewind();while(data.remaining()>=8){
@@ -101,7 +117,7 @@ public final class InputBroker {
         }
         dirty[channel]=true;
         if(!send(channel,bytes,budget)){
-            int failure=sendResult;gate.pause(session,failure);revoked.add(session);
+            int failure=sendResult;physical.release(session,"INPUT_DELIVERY_FAILED");gate.pause(session,failure);revoked.add(session);
             // Preserve the original ACK/transport cause before cleanup attempts another send.
             MonotonicDeadline cleanup=new MonotonicDeadline(RELEASE_MS);queue(()->{if(gate.current(session))release(cleanup);});return failure;
         }
@@ -149,7 +165,7 @@ public final class InputBroker {
                 if(ready<0)return ready;
                 if(budget.millis()==0)return ManagedStart.START_TIMEOUT;
                 vm=target;long captured=gate.attach();publishedGeneration=captured;client=lifetime;
-                death=()->{revoked.add(captured);MonotonicDeadline deathBudget=new MonotonicDeadline(RELEASE_MS);queue(()->retire(captured,deathBudget));};
+                death=()->{physical.release(captured,"CLIENT_DIED");revoked.add(captured);MonotonicDeadline deathBudget=new MonotonicDeadline(RELEASE_MS);queue(()->retire(captured,deathBudget));};
                 try{client.linkToDeath(death,0);}catch(RemoteException ignored){retire(captured,new MonotonicDeadline(RELEASE_MS));return ManagedStart.NOT_READY;}
                 return captured;
             },ManagedStart.START_TIMEOUT);
@@ -165,12 +181,32 @@ public final class InputBroker {
             check(supplied);if(revoked.contains(session))return BrokerGate.PAUSED;
             MonotonicDeadline budget=new MonotonicDeadline(2500);return call(budget,()->writeNow(session,channel,bytes,budget),BrokerGate.IPC_ERROR);
         }
+        public String keyboardGrab(String supplied,long session,boolean enabled){
+            check(supplied);
+            if(!enabled){physical.release(session,"DISABLED");return physical.status();}
+            if(session!=publishedGeneration||revoked.contains(session))return "{\"held\":[],\"reason\":\"SESSION_PAUSED\"}";
+            physical.arm(session);
+            if(session!=publishedGeneration||revoked.contains(session))physical.release(session,"SESSION_PAUSED");
+            return physical.status();
+        }
+        public String grabStatus(String supplied,long session){
+            check(supplied);return physical.status();
+        }
+        public int physicalKey(String supplied,long session,String name,int vendor,int product,byte[] bytes){
+            check(supplied);
+            if(physical.held(name,vendor,product))return BrokerGate.HELD_SUPPRESSED;
+            MonotonicDeadline budget=new MonotonicDeadline(2500);
+            return call(budget,()->{
+                if(physical.held(name,vendor,product))return BrokerGate.HELD_SUPPRESSED;
+                return writeNow(session,1,bytes,budget);
+            },BrokerGate.IPC_ERROR);
+        }
         public void releaseAll(String supplied,long session){
-            check(supplied);revoked.add(session);MonotonicDeadline budget=new MonotonicDeadline(RELEASE_MS);
+            check(supplied);physical.release(session,"CLIENT_RELEASED");revoked.add(session);MonotonicDeadline budget=new MonotonicDeadline(RELEASE_MS);
             call(budget,()->{if(gate.pause(session,BrokerGate.PAUSED))release(budget);return true;},false);
         }
         public void detach(String supplied,long session){
-            check(supplied);revoked.add(session);MonotonicDeadline budget=new MonotonicDeadline(RELEASE_MS);
+            check(supplied);physical.release(session,"CLIENT_RELEASED");revoked.add(session);MonotonicDeadline budget=new MonotonicDeadline(RELEASE_MS);
             call(budget,()->{retire(session,budget);return true;},false);
         }
     };}
@@ -184,7 +220,7 @@ public final class InputBroker {
         Handler handler=new Handler(Looper.getMainLooper());
         handler.postDelayed(new Runnable(){public void run(){if(owner.publishedGeneration!=0)return;context.sendBroadcast(new Intent(ACTION).setPackage(PACKAGE).putExtra("session",session));handler.postDelayed(this,500);}},250);
         new Thread(()->{try{while(control.readLine()!=null){}}catch(Exception ignored){}finally{
-            owner.closing=true;long g=owner.publishedGeneration;owner.revoked.add(g);MonotonicDeadline budget=new MonotonicDeadline(RELEASE_MS);
+            owner.closing=true;long g=owner.publishedGeneration;owner.physical.release(g,"OWNER_PIPE_CLOSED");owner.revoked.add(g);MonotonicDeadline budget=new MonotonicDeadline(RELEASE_MS);
             owner.call(budget,()->{owner.retire(g,budget);return true;},false);System.exit(0);
         }},"broker-owner").start();
         handler.postDelayed(()->{if(!owner.attachedOnce)System.exit(0);},15000);Looper.loop();
